@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!-- Временная страница для проверки API, полноценный интерфейс делает Алёна. -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Волны у берега Финского залива</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <h1>Волны у берега Финского залива</h1>
+
+  <p>
+    Модель: <select id="model"></select>
+    <span id="description"></span>
+  </p>
+
+  <!-- Поля совпадают с Params из backend/contract.py -->
+  <p>
+    a, м <input id="a" type="number" step="any" value="0.5">
+    wavelength, м <input id="wavelength" type="number" step="any" value="20">
+    depth, м <input id="depth" type="number" step="any" value="5">
+    L, м <input id="L" type="number" step="any" value="200">
+    t_end, с <input id="t_end" type="number" step="any" value="30">
+    nx <input id="nx" type="number" value="400">
+    n_frames <input id="n_frames" type="number" value="100">
+  </p>
+  <button id="run">Рассчитать</button>
+  <span id="status"></span>
+
+  <div id="plot" style="height: 500px"></div>
+
+  <script>
+    const FIELDS = ["a", "wavelength", "depth", "L", "t_end", "nx", "n_frames"];
+    const select = document.getElementById("model");
+    const status = document.getElementById("status");
+    let models = [];
+
+    async function loadModels() {
+      models = await (await fetch("/models")).json();
+      select.innerHTML = models.map(m => `<option value="${m.id}">${m.name}</option>`).join("");
+      showDescription();
+    }
+
+    function showDescription() {
+      const m = models.find(m => m.id === select.value);
+      document.getElementById("description").textContent = m ? m.description : "";
+    }
+
+    async function run() {
+      const params = Object.fromEntries(FIELDS.map(f => [f, Number(document.getElementById(f).value)]));
+      status.textContent = "Считаем...";
+      const resp = await fetch("/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: select.value, params }),
+      });
+      if (!resp.ok) {
+        status.textContent = "Ошибка: " + (await resp.text());
+        return;
+      }
+      status.textContent = "";
+      draw(await resp.json());
+    }
+
+    // Result: x, t, eta[кадр][точка], h
+    function draw(r) {
+      const ymax = Math.max(...r.eta.map(row => Math.max(...row.map(Math.abs)))) * 1.2 || 1;
+      const frames = r.t.map((t, i) => ({
+        name: String(i),
+        data: [{ x: r.x, y: r.eta[i] }],
+        layout: { title: `η(x), t = ${t.toFixed(2)} с` },
+      }));
+      Plotly.newPlot("plot", {
+        data: [{ x: r.x, y: r.eta[0], mode: "lines", name: "η" }],
+        layout: {
+          title: `η(x), t = ${r.t[0].toFixed(2)} с`,
+          xaxis: { title: "x, м" },
+          yaxis: { title: "η, м", range: [-ymax, ymax] },
+          updatemenus: [{
+            type: "buttons",
+            buttons: [
+              { label: "▶ Play", method: "animate",
+                args: [null, { frame: { duration: 50, redraw: true }, transition: { duration: 0 }, fromcurrent: true }] },
+              { label: "❚❚ Pause", method: "animate",
+                args: [[null], { mode: "immediate", frame: { duration: 0 } }] },
+            ],
+          }],
+        },
+        frames,
+      });
+    }
+
+    select.addEventListener("change", showDescription);
+    document.getElementById("run").addEventListener("click", run);
+    loadModels();
+  </script>
+</body>
+</html>
