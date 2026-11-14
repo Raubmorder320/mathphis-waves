@@ -1,0 +1,96 @@
+{
+  "grid": {
+    "id": 1,
+    "order": 0,
+    "name": "gebco_2026_global",
+    "group_name": "GEBCO 2026",
+    "display_name": "Global",
+    "description": "Global grid of elevation values in meters on a 15 arc-second interval grid. Published April 2026. This grid includes three datasets: (1) Bathymetry, which includes land and ice surface elevation information; (2) Bathymetry (sub ice), which includes under-ice topography information for Greenland and Antarctica and (3) Type identifier grid (TID) which defines the data type available at each data point.",
+    "data_sources": [
+      {
+        "id": 1,
+        "order": 0,
+        "name": "gebco_2026",
+        "display_name": "Bathymetry",
+        "wms_url": "https://wms.gebco.net/mapserv",
+        "wms_layer": "gebco_latest",
+        "x_name": "lon",
+        "y_name": "lat",
+        "z_name": "elevation",
+        "maximum_area": 14400
+      },
+      {
+        "id": 2,
+        "order": 1,
+        "name": "gebco_2026_sub_ice",
+        "display_name": "Bathymetry (sub ice)",
+        "wms_url": "https://wms.gebco.net/mapserv",
+        "wms_layer": "gebco_latest_sub_ice_topo",
+        "x_name": "lon",
+        "y_name": "lat",
+        "z_name": "elevation",
+        "maximum_area": 14400
+      },
+      {
+        "id": 3,
+        "order": 2,
+        "name": "gebco_2026_tid",
+        "display_name": "Type identifer grid (TID)",
+        "wms_url": "https://wms.gebco.net/mapserv",
+        "wms_layer": "gebco_latest_tid",
+        "x_name": "lon",
+        "y_name": "lat",
+        "z_name": "tid",
+        "maximum_area": 14400
+      }
+    ],
+    "wms_url": "https://wms.gebco.net/mapserv",
+    "wms_layer": "gebco_latest",
+    "projection": "EPSG:4326",
+    "x_min": -180,
+    "x_max": 360,
+    "y_min": -90,
+    "y_max": 90,
+    "x_min_name": "West",
+    "x_max_name": "East",
+    "y_min_name": "South",
+    "y_max_name": "North"
+  },
+  "request": {
+    "id": "0",
+    "email": null,
+    "submission_date": "2026-11-14T16:18:53.030575+00:00",
+    "processing_status": "new",
+    "items": [
+      {
+        "id": 0,
+        "grid_id": 1,
+        "data_source_ids": [
+          1,
+          3
+        ],
+        "formats": [
+          1
+        ],
+        "left": 27.0,
+        "right": 30.4,
+        "bottom": 59.4,
+        "top": 60.6
+      }
+    ]
+  },
+  "response": {
+    "message": "Basket added to queue",
+    "basketId": "GEBCO_14_Nov_2026_7f19d9e362a7"
+  },
+  "source": "https://download.gebco.net",
+  "retrieved_utc": "2026-11-14T16:18:53.513219+00:00",
+  "archive_sha256": "5bbfa7ae2b8e952730ea5221f0695a2ae099060a9f3230e18b66e1c09d636d85",
+  "archive_bytes": 1147694,
+  "archive_members": [
+    "gebco_2026_n60.6_s59.4_w27.0_e30.4.nc",
+    "gebco_2026_tid_n60.6_s59.4_w27.0_e30.4.nc",
+    "GEBCO_Grid_documentation.pdf",
+    "GEBCO_Grid_terms_of_use.pdf"
+  ]
+}
