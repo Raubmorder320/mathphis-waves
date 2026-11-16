@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<!--
+  Эмулятор: страница, на которой модели из GET /models накладываются на одном графике.
+  Один файл без сборки: HTML, CSS, обычный JavaScript, Plotly.js и KaTeX с CDN.
+
+  Что страница ждёт от сервера (backend/contract.py, backend/main.py):
+    GET  /models   -> [{id, name, description, dim?, extra_params?}, ...]
+                      dim: 1 или 2 (если поля нет, считаем 1);
+                      extra_params: список описаний доп. полей (формат см. normExtra ниже).
+    POST /simulate {model_id, params} -> Result {x, t, eta, h, y?}
+                      1D: eta[кадр][ix], h[ix];  2D: eta[кадр][iy][ix], h[iy][ix], y[iy].
+  Значения по умолчанию для полей формы берутся из /openapi.json (схема Params), если сервер их отдаёт.
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Волны у берега Финского залива</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4f6f8; --card: #fff; --ink: #1d2733; --muted: #66727f; --line: #dde3e9;
+      --accent: #1f6fb2; --warn-bg: #fff4dc; --warn: #8a5a00; --err-bg: #fde8e8; --err: #a12626;
+      --ok: #2e7d32;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+    header { padding: 14px 22px; background: #0f3d63; color: #fff; }
+    header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+    header p { margin: 2px 0 0; opacity: .8; font-size: 13px; }
+    .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px; align-items: start; }
+    @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+    .card h2 { margin: 0 0 8px; font-size: 15px; }
+    .card h3 { margin: 10px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+    label.row { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; margin: 5px 0; }
+    label.row span small { color: var(--muted); }
+    input[type=number], input[type=text], select { width: 100%; padding: 4px 6px; border: 1px solid #c5ced8; border-radius: 4px; font: inherit; background: #fff; }
+    input:disabled, select:disabled { background: #eef1f4; color: #98a2ad; }
+    button { font: inherit; padding: 6px 12px; border-radius: 5px; border: 1px solid #b8c3ce; background: #fff; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button:disabled { opacity: .5; cursor: default; }
+    .models label { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; }
+    .swatch { width: 14px; height: 4px; border-radius: 2px; flex: none; }
+    .badge { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #e7eef5; color: #3b5670; font-weight: 400; }
+    .muted { color: var(--muted); }
+    .hint { font-size: 12px; color: var(--muted); }
+    .warn { background: var(--warn-bg); color: var(--warn); border-radius: 5px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
+    .err { background: var(--err-bg); color: var(--err); border-radius: 5px; padding: 6px 8px; margin: 6px 0; font-size: 13px; white-space: pre-wrap; }
+    .numbers { width: 100%; border-collapse: collapse; }
+    .numbers td { padding: 3px 4px; border-bottom: 1px solid #eef1f4; }
+    .numbers td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .status-list { margin-top: 8px; font-size: 13px; }
+    .status-list > div { display: flex; gap: 6px; align-items: baseline; }
+    .status-list .ok { color: var(--ok); }
+    .status-list .fail { color: var(--err); }
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #9fbbd6; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .player { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .player input[type=range] { flex: 1; min-width: 200px; }
+    .player .time { min-width: 110px; font-variant-numeric: tabular-nums; }
+    .plot-wrap { position: relative; }
+    .overlay { position: absolute; inset: 0; background: rgba(255,255,255,.65); display: none; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--accent); z-index: 5; }
+    .overlay.on { display: flex; }
+    .empty { padding: 40px; text-align: center; color: var(--muted); }
+    .two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+    @media (max-width: 1200px) { .two { grid-template-columns: 1fr; } }
+    .model-desc { border-top: 1px solid var(--line); padding: 10px 0; }
+    .model-desc:first-child { border-top: 0; }
+    .model-desc h4 { margin: 0 0 4px; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+    .model-desc .server { color: var(--muted); margin-top: 4px; }
+    .ladder svg { width: 100%; height: auto; max-width: 820px; display: block; }
+    .ladder .box rect { fill: #f7fafc; stroke: #b8c3ce; stroke-width: 1.2; stroke-dasharray: 4 3; }
+    .ladder .box.available { cursor: pointer; }
+    .ladder .box.available rect { fill: #e8f1fa; stroke: var(--accent); stroke-dasharray: none; }
+    .ladder .box.recommended rect { stroke: #d98200; stroke-width: 3; }
+    .ladder .box text { font-size: 12px; fill: var(--ink); }
+    .ladder .box text.title { font-weight: 700; font-size: 13px; }
+    .ladder .box.missing text { fill: #9aa6b2; }
+    .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .inline select, .inline input { width: auto; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Волны у берега Финского залива</h1>
+  <p>Эмулятор: решения моделей на одном графике. Где нелинейность важна?</p>
+</header>
+
+<div class="layout">
+  <!-- ===================== Левая колонка: форма ===================== -->
+  <aside>
+    <div class="card">
+      <h2>Модели</h2>
+      <div id="models" class="models"><span class="muted">Загружаем список моделей…</span></div>
+      <div id="models-error"></div>
+    </div>
+
+    <div class="card">
+      <h2>Параметры</h2>
+      <label class="row"><span>Пресет</span>
+        <select id="preset"><option value="">— свои значения —</option></select></label>
+      <div id="preset-note" class="hint"></div>
+
+      <label class="row"><span>Амплитуда a, <small>м</small></span><input id="a" type="number" step="any" min="0"></label>
+      <label class="row"><span>Длина волны λ, <small>м</small></span><input id="wavelength" type="number" step="any" min="0"></label>
+      <label class="row"><span>Глубина h, <small>м</small></span><input id="depth" type="number" step="any" min="0"></label>
+      <label class="row"><span>Дно</span>
+        <select id="bottom">
+          <option value="flat">flat — ровное</option>
+          <option value="slope">slope — склон к берегу</option>
+          <option value="gulf">gulf — профиль залива</option>
+        </select></label>
+      <label class="row"><span>Глубина у берега depth_shore, <small>м</small></span><input id="depth_shore" type="number" step="any" min="0"></label>
+      <label class="row"><span>Область L, <small>м</small></span><input id="L" type="number" step="any" min="0"></label>
+      <label class="row"><span>Время расчёта t_end, <small>с</small></span><input id="t_end" type="number" step="any" min="0"></label>
+      <label class="row"><span>Узлов сетки nx</span><input id="nx" type="number" step="1" min="2"></label>
+      <label class="row"><span>Кадров n_frames</span><input id="n_frames" type="number" step="1" min="2"></label>
+
+      <div id="extra"></div>
+      <div id="contract-note" class="hint"></div>
+
+      <div class="actions">
+        <button id="run" class="primary">Рассчитать</button>
+        <button id="cancel" disabled>Отменить</button>
+      </div>
+      <div id="run-status" class="status-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Оценки по параметрам</h2>
+      <table class="numbers" id="numbers"></table>
+      <div id="numbers-warn"></div>
+      <div id="ur-hint" class="hint" style="margin-top:6px"></div>
+      <div class="hint" style="margin-top:6px">Формулы — разделы 1 и 3 теории; h — глубина на входе (поле «Глубина»).</div>
+    </div>
+  </aside>
+
+  <!-- ===================== Правая колонка: графики ===================== -->
+  <main>
+    <div class="card">
+      <div class="player">
+        <button id="play" disabled>▶ Пуск</button>
+        <input id="time" type="range" min="0" max="0" value="0" disabled>
+        <span class="time" id="time-label">t = —</span>
+        <label class="inline">Скорость
+          <select id="speed">
+            <option value="0.25">×0,25</option>
+            <option value="0.5">×0,5</option>
+            <option value="1" selected>×1</option>
+            <option value="2">×2</option>
+            <option value="4">×4</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="card" id="card-1d">
+      <h2>Профиль волны η(x, t) и дно</h2>
+      <div class="plot-wrap">
+        <div id="wave" style="height: 560px"><div class="empty">Выберите модели и нажмите «Рассчитать».</div></div>
+        <div class="overlay" id="overlay-1d"><span class="spinner"></span> Считаем…</div>
+      </div>
+    </div>
+
+    <div class="card" id="card-diff">
+      <h2>Разность двух моделей во времени</h2>
+      <div class="inline">
+        <select id="diff-a"></select> минус <select id="diff-b"></select>
+        <span class="hint">d(t) = max<sub>x</sub>|η<sub>A</sub> − η<sub>B</sub>| / a, раздел 6.1</span>
+      </div>
+      <div id="diff" style="height: 300px"><div class="empty">Нужно хотя бы две посчитанные одномерные модели.</div></div>
+      <div id="diff-summary" class="hint"></div>
+    </div>
+
+    <div class="card" id="card-2d" style="display:none">
+      <h2>Карта уровня воды (модель с dim = 2)</h2>
+      <div class="inline" style="margin-bottom:6px">
+        <span>Модель: <b id="map-model"></b></span>
+        <label class="inline">порог a/h <input id="zone-thr" type="number" step="0.05" min="0" value="0.1" style="width:70px"></label>
+        <span class="hint">фиолетовый пунктир — зона, где max|η|/h больше порога; щёлкните по карте, чтобы выбрать точку</span>
+      </div>
+      <div class="two">
+        <div class="plot-wrap">
+          <div id="map" style="height: 460px"></div>
+          <div class="overlay" id="overlay-2d"><span class="spinner"></span> Считаем…</div>
+        </div>
+        <div id="point" style="height: 460px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Лестница моделей</h2>
+      <div class="ladder" id="ladder"></div>
+      <div class="hint">Синие — модели, которые уже есть на сервере, пунктирные — ещё нет; оранжевая рамка — что подходит при текущем числе Урселла. Щелчок по синему блоку отмечает модель.</div>
+    </div>
+
+    <div class="card">
+      <h2>Описание моделей</h2>
+      <div id="descriptions"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+const G = 9.81;
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// Поля формы, которые уходят в Params. Значения ниже используются, только если
+// сервер не отдал свои значения по умолчанию в /openapi.json.
+// ---------------------------------------------------------------------------
+const FIELDS = {
+  a:           { def: 0.5,  type: "float" },
+  wavelength:  { def: 100,  type: "float" },
+  depth:       { def: 5,    type: "float" },
+  bottom:      { def: "flat", type: "str" },
+  depth_shore: { def: 0.5,  type: "float" },
+  L:           { def: 1000, type: "float" },
+  t_end:       { def: 60,   type: "float" },
+  nx:          { def: 400,  type: "int" },
+  n_frames:    { def: 100,  type: "int" },
+};
+
+// ---------------------------------------------------------------------------
+// Пресеты. Числа взяты из таблицы раздела 5 теории (те же четыре сценария);
+// когда появится analysis/gulf.md, сверить с ним. extra: имя доп. параметра -> значение,
+// подставляется в поля моделей с таким же именем.
+// ---------------------------------------------------------------------------
+const PRESETS = [
+  { id: "surge", name: "Нагон в Невской губе",
+    note: "a = 2 м, λ = 50 км, h = 4 м: ε = 0,5, t* ≈ 28 мин. Нелинейность решающая, нужна Сен-Венан.",
+    params: { a: 2, wavelength: 50000, depth: 4, bottom: "gulf", depth_shore: 0, L: 200000, t_end: 3600, nx: 400, n_frames: 60 },
+    extra: { wind_speed: 25, wind: 25, wind_dir: 270, wind_direction: 270 },
+    models: ["linear", "saint_venant", "shallow_2d"] },
+  { id: "test", name: "Тестовая волна",
+    note: "a = 0,5 м, λ = 5 км, h = 20 м: ε = 0,025, t* ≈ 25 мин. Проверка укручения в Сен-Венане.",
+    params: { a: 0.5, wavelength: 5000, depth: 20, bottom: "flat", L: 20000, t_end: 2400, nx: 400, n_frames: 100 },
+    models: ["linear", "saint_venant"] },
+  { id: "solitons", name: "Солитоны",
+    note: "a = 0,5 м, λ = 500 м, h = 20 м: Ur ≈ 16. Импульс распадается на солитоны (КдФ, Буссинеск).",
+    params: { a: 0.5, wavelength: 500, depth: 20, bottom: "flat", L: 5000, t_end: 600, nx: 800, n_frames: 120 },
+    models: ["linear", "saint_venant", "kdv", "boussinesq"] },
+  { id: "wind", name: "Ветровая волна у берега",
+    note: "a = 1 м, λ = 38 м, h = 3 м: ε = 0,33, Ur ≈ 54, kh ≈ 0,5 (уже не мелкая вода). Буссинеск + критерий обрушения.",
+    params: { a: 1, wavelength: 38, depth: 3, bottom: "slope", depth_shore: 0, L: 400, t_end: 30, nx: 800, n_frames: 120 },
+    models: ["linear", "saint_venant", "boussinesq"] },
+];
+
+// ---------------------------------------------------------------------------
+// Справка по известным моделям (формулы из docs/theory.md). Модели, которых здесь нет,
+// показываются со своим description с сервера — дописывать сюда не обязательно.
+// ---------------------------------------------------------------------------
+const MODEL_INFO = {
+  linear: {
+    step: "база сравнения",
+    text: String.raw`Давление гидростатическое, нелинейных членов нет ($\varepsilon \to 0,\ \mu \to 0$). Волна бежит со скоростью $c_0=\sqrt{gh}$ без изменения формы, на мелеющем дне растёт по закону Грина $A \propto h^{-1/4}$.
+$$\eta_t + (h u)_x = 0, \qquad u_t + g\,\eta_x = 0 \;\Longrightarrow\; \eta_{tt} = g\,(h\,\eta_x)_x$$`},
+  saint_venant: {
+    step: "ступень 1",
+    text: String.raw`Нелинейная мелкая вода ($\mu \to 0$, $\varepsilon$ любое). Гребень обгоняет подошву, к моменту $t_*$ фронт становится вертикальным, дальше бежит бор, волна накатывает на берег.
+$$H_t + (H u)_x = 0, \qquad (H u)_t + \left(H u^2 + \tfrac12 g H^2\right)_x = g\,H\,h_x,\qquad H = h+\eta$$`},
+  kdv: {
+    step: "ступень 2",
+    text: String.raw`Волна в одну сторону, нелинейность уравновешена дисперсией ($\varepsilon \sim \mu \ll 1$). Импульс распадается на солитоны $\eta = A\,\mathrm{sech}^2\!\big((x-Vt)/\Delta\big)$, $\Delta = \sqrt{4h^3/(3A)}$.
+$$\eta_t + c_0\,\eta_x + \frac{3 c_0}{2h}\,\eta\,\eta_x + \frac{c_0 h^2}{6}\,\eta_{xxx} = 0$$`},
+  boussinesq: {
+    step: "ступень 3",
+    text: String.raw`Первая поправка на негидростатичность давления, переменное дно, волны в обе стороны. Вместо разрыва — ондулярный бор, обрушение по критерию $H/h > 0{,}78$.
+$$\eta_t + \left[(h+\eta)\,u\right]_x = 0, \qquad u_t + u u_x + g\,\eta_x = \frac{h}{2}\,(h\,u_t)_{xx} - \frac{h^2}{6}\,u_{xxt}, \qquad \omega^2 = \frac{g h k^2}{1 + (kh)^2/3}$$`},
+  shallow_2d: {
+    step: "ступень 4",
+    text: String.raw`Сен-Венан на плоскости с реальным рельефом восточной части залива и Невской губы: сила Кориолиса $f \approx 1{,}26\cdot10^{-4}\ \text{с}^{-1}$, ветер $\boldsymbol\tau_s=\rho_a C_d|\mathbf W|\mathbf W$, донное трение.
+$$\eta_t + \nabla\cdot(H\mathbf{u}) = 0, \qquad \mathbf{u}_t + (\mathbf{u}\cdot\nabla)\mathbf{u} + f\,\mathbf{e}_z\times\mathbf{u} + g\nabla\eta = -\frac{\nabla p_a}{\rho} + \frac{\boldsymbol{\tau}_s}{\rho H} - C_f\,\frac{|\mathbf{u}|\,\mathbf{u}}{H}$$`},
+};
+
+// Отметки на 2D-карте. Предполагаем, что x, y в Result — метры от юго-западного угла
+// области (27° в. д., 59,4° с. ш.). Если у Влада другое начало координат, поправить ORIGIN.
+const ORIGIN = { lon: 27.0, lat: 59.4 };
+const PLACES = [
+  { name: "Петербург", lon: 30.31, lat: 59.94 },
+  { name: "Кронштадт", lon: 29.77, lat: 59.99 },
+];
+function lonLatToXY(lon, lat) {
+  const R = 6371000, d2r = Math.PI / 180;
+  return { x: (lon - ORIGIN.lon) * d2r * R * Math.cos(((lat + ORIGIN.lat) / 2) * d2r), y: (lat - ORIGIN.lat) * d2r * R };
+}
+
+const COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"];
+const REQUEST_TIMEOUT_MS = 180000;
+const FPS_AT_X1 = 20;        // скорость ×1 = 20 кадров в секунду
+
+// ---------------------------------------------------------------------------
+// Состояние
+// ---------------------------------------------------------------------------
+let models = [];             // из GET /models, с нормализованными dim и extra
+const color = {};            // id -> цвет
+const state = {
+  results: {},               // id -> Result (только успешные)
+  params: null,              // params, с которыми посчитано
+  tGrid: [], frame: 0, playing: false, lastTs: 0, acc: 0,
+  ids1d: [], id2d: null,
+  diff: null,                // {a, b, t, d}
+  point: null,               // {id, ix, iy} для 2D
+  recommended: [],
+  runId: 0, controllers: [],
+};
+
+// ---------------------------------------------------------------------------
+// Утилиты
+// ---------------------------------------------------------------------------
+function fmt(v, digits = 3) {
+  if (!isFinite(v)) return "∞";
+  if (v !== 0 && (Math.abs(v) >= 1e5 || Math.abs(v) < 1e-3)) {
+    const e = Math.floor(Math.log10(Math.abs(v)));
+    return (v / 10 ** e).toLocaleString("ru-RU", { maximumSignificantDigits: 2 }) + "·10" + sup(e);
+  }
+  return v.toLocaleString("ru-RU", { maximumSignificantDigits: digits });
+}
+function sup(n) { return String(n).split("").map(c => "⁰¹²³⁴⁵⁶⁷⁸⁹⁻"["0123456789-".indexOf(c)]).join(""); }
+function fmtTime(s) {
+  if (!isFinite(s)) return "∞";
+  if (s < 120) return fmt(s) + " с";
+  if (s < 7200) return fmt(s / 60) + " мин";
+  if (s < 3.6e11) return fmt(s / 3600) + " ч";
+  return "≈ ∞";
+}
+function fmtLen(m) { return !isFinite(m) ? "∞" : m < 2000 ? fmt(m) + " м" : fmt(m / 1000) + " км"; }
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c);
+  return e;
+}
+function nearestIndex(arr, v) {          // arr возрастает
+  let lo = 0, hi = arr.length - 1;
+  if (hi <= 0) return 0;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arr[m] <= v) lo = m; else hi = m; }
+  return Math.abs(arr[hi] - v) < Math.abs(arr[lo] - v) ? hi : lo;
+}
+function interp(xs, ys, x) {             // линейная интерполяция, xs возрастает
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] <= x) lo = m; else hi = m; }
+  const w = (x - xs[lo]) / (xs[hi] - xs[lo]);
+  return ys[lo] * (1 - w) + ys[hi] * w;
+}
+function renderMath(node) {
+  const go = () => renderMathInElement(node, { delimiters: [
+      { left: "$$", right: "$$", display: true }, { left: "\\[", right: "\\]", display: true },
+      { left: "$", right: "$", display: false }, { left: "\\(", right: "\\)", display: false }],
+      throwOnError: false });
+  if (window.renderMathInElement) go(); else window.addEventListener("load", go, { once: true });
+}
+
+// ---------------------------------------------------------------------------
+// Описание доп. параметров модели (extra_params). Принимаем разные формы, пока контракт не устоялся:
+//   ["wind_speed", ...]
+//   [{name|key|id, label|title, default|value, unit, min, max, step, type, options|choices, description}, ...]
+//   {wind_speed: 20, friction: {default: 0.0025, label: "C_f"}}
+// Тип поля: явный type ("float", "int", "bool", "choice", "str") или по значению по умолчанию.
+// ---------------------------------------------------------------------------
+function normExtra(spec) {
+  if (!spec) return [];
+  const list = Array.isArray(spec) ? spec
+    : typeof spec === "object"
+      ? Object.entries(spec).map(([k, v]) => (v && typeof v === "object" && !Array.isArray(v)) ? { name: k, ...v } : { name: k, default: v })
+      : [];
+  return list.map(p => {
+    if (typeof p === "string") p = { name: p };
+    const name = p.name ?? p.key ?? p.id;
+    if (!name) return null;
+    const options = p.options ?? p.choices ?? p.enum ?? null;
+    const def = p.default ?? p.value ?? (options ? (typeof options[0] === "object" ? options[0].value : options[0]) : 0);
+    let type = String(p.type || "").toLowerCase();
+    if (options) type = "choice";
+    else if (["int", "integer"].includes(type)) type = "int";
+    else if (["bool", "boolean"].includes(type) || typeof def === "boolean") type = "bool";
+    else if (["str", "string", "text"].includes(type) || typeof def === "string") type = "str";
+    else type = "float";
+    return { name: String(name), label: p.label ?? p.title ?? String(name), unit: p.unit ?? p.units ?? "",
+             help: p.description ?? p.help ?? "", def, type, options, min: p.min, max: p.max, step: p.step };
+  }).filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Загрузка
+// ---------------------------------------------------------------------------
+async function loadModels() {
+  $("models-error").innerHTML = "";
+  try {
+    const resp = await fetch("/models");
+    if (!resp.ok) throw new Error(`сервер ответил ${resp.status}: ${await errorText(resp)}`);
+    const list = await resp.json();
+    models = list.map(m => ({ ...m, dim: Number(m.dim) === 2 ? 2 : 1, extra: normExtra(m.extra_params) }));
+  } catch (e) {
+    $("models").innerHTML = "";
+    $("models-error").append(el("div", { class: "err", text: "Не удалось получить список моделей: " + (e instanceof TypeError ? "сервер не отвечает" : e.message) }),
+      el("button", { onclick: loadModels, text: "Повторить" }));
+    return;
+  }
+  models.forEach((m, i) => color[m.id] = COLORS[i % COLORS.length]);
+  renderModelList();
+  renderExtra();
+  renderDescriptions();
+  updateNumbers();
+}
+
+async function loadDefaults() {
+  // Значения по умолчанию из схемы Params, которую FastAPI публикует в /openapi.json.
+  for (const [k, f] of Object.entries(FIELDS)) $(k).value = f.def;
+  try {
+    const spec = await (await fetch("/openapi.json")).json();
+    const schemas = Object.values(spec?.components?.schemas || {});
+    const params = schemas.find(s => s.properties?.wavelength && s.properties?.depth && s.properties?.t_end);
+    if (!params) return;
+    const known = new Set(Object.keys(params.properties));
+    for (const [k, prop] of Object.entries(params.properties)) {
+      if (FIELDS[k] && prop.default !== undefined) $(k).value = prop.default;
+    }
+    const bottomEnum = params.properties.bottom?.enum;       // если варианты дна объявят как Literal
+    if (bottomEnum) {
+      const sel = $("bottom"), cur = sel.value;
+      for (const v of bottomEnum) if (![...sel.options].some(o => o.value === v)) sel.append(el("option", { value: v, text: v }));
+      sel.value = cur;
+    }
+    const missing = ["bottom", "depth_shore", "extra"].filter(k => !known.has(k));
+    if (missing.length) $("contract-note").textContent =
+      `Сервер пока не знает полей ${missing.join(", ")} (старый contract.py): они уходят в запрос, но модели их не получат.`;
+  } catch (e) { /* нет openapi — остаются значения по умолчанию страницы */ }
+}
+
+function renderModelList() {
+  const box = $("models");
+  const prev = new Set(selectedIds());
+  box.innerHTML = "";
+  if (!models.length) { box.append(el("span", { class: "muted", text: "Сервер не вернул ни одной модели." })); return; }
+  for (const m of models) {
+    const cb = el("input", { type: "checkbox", value: m.id, "data-dim": m.dim });
+    cb.checked = prev.size ? prev.has(m.id) : m.dim === 1;
+    cb.addEventListener("change", () => {
+      if (cb.checked && m.dim === 2) {        // карта одна: вторая 2D-модель снимает первую
+        document.querySelectorAll('#models input[data-dim="2"]').forEach(o => { if (o !== cb) o.checked = false; });
+      }
+      renderExtra(); renderLadder();
+    });
+    const lab = el("label", {}, cb, el("span", { class: "swatch", style: `background:${color[m.id]}` }), el("span", { text: m.name || m.id }));
+    if (m.dim === 2) lab.append(el("span", { class: "badge", text: "2D" }));
+    lab.title = m.description || "";
+    box.append(lab);
+  }
+}
+function selectedIds() { return [...document.querySelectorAll("#models input:checked")].map(c => c.value); }
+function modelById(id) { return models.find(m => m.id === id); }
+function modelName(id) { return modelById(id)?.name || id; }
+
+function renderExtra() {
+  const box = $("extra");
+  const saved = collectExtra();
+  box.innerHTML = "";
+  for (const id of selectedIds()) {
+    const m = modelById(id);
+    if (!m || !m.extra.length) continue;
+    box.append(el("h3", { text: "Параметры модели «" + modelName(m.id) + "»" }));
+    for (const p of m.extra) {
+      const fid = `extra__${m.id}__${p.name}`;
+      let input;
+      if (p.type === "bool") { input = el("input", { type: "checkbox", id: fid }); input.checked = !!p.def; }
+      else if (p.type === "choice") {
+        input = el("select", { id: fid });
+        for (const o of p.options) {
+          const v = typeof o === "object" ? o.value : o, t = typeof o === "object" ? (o.label ?? o.value) : o;
+          input.append(el("option", { value: v, text: t }));
+        }
+        input.value = p.def;
+      } else if (p.type === "str") { input = el("input", { type: "text", id: fid }); input.value = p.def ?? ""; }
+      else {
+        input = el("input", { type: "number", id: fid, step: p.step ?? (p.type === "int" ? 1 : "any") });
+        if (p.min !== undefined) input.min = p.min;
+        if (p.max !== undefined) input.max = p.max;
+        input.value = p.def;
+      }
+      const old = saved[m.id]?.[p.name];
+      if (old !== undefined) { if (p.type === "bool") input.checked = old; else input.value = old; }
+      const lab = el("label", { class: "row" }, el("span", {}, p.label, p.unit ? el("small", { text: ", " + p.unit }) : ""), input);
+      if (p.help) lab.title = p.help;
+      box.append(lab);
+    }
+  }
+}
+function collectExtra() {                 // {model_id: {name: value}}
+  const out = {};
+  for (const m of models) for (const p of m.extra) {
+    const input = $(`extra__${m.id}__${p.name}`);
+    if (!input) continue;
+    let v = p.type === "bool" ? input.checked : input.value;
+    if (p.type === "float") v = Number(v);
+    if (p.type === "int") v = Math.round(Number(v));
+    if (p.type === "choice" && typeof (p.options[0]?.value ?? p.options[0]) === "number") v = Number(v);
+    (out[m.id] ||= {})[p.name] = v;
+  }
+  return out;
+}
+function collectParams() {
+  const p = {};
+  for (const [k, f] of Object.entries(FIELDS)) {
+    const v = $(k).value;
+    p[k] = f.type === "str" ? v : f.type === "int" ? Math.round(Number(v)) : Number(v);
+  }
+  return p;
+}
+function validate(p) {
+  const errs = [];
+  for (const k of ["a", "wavelength", "depth", "depth_shore", "L", "t_end"]) if (!isFinite(p[k]) || $(k).value === "") errs.push(`поле ${k} пустое или не число`);
+  if (p.depth <= 0) errs.push("глубина должна быть больше 0");
+  if (p.wavelength <= 0) errs.push("длина волны должна быть больше 0");
+  if (p.L <= 0 || p.t_end <= 0) errs.push("L и t_end должны быть больше 0");
+  if (!(p.nx >= 2) || !(p.n_frames >= 2)) errs.push("nx и n_frames — не меньше 2");
+  if (p.depth_shore < 0) errs.push("depth_shore не может быть отрицательной");
+  return errs;
+}
+
+// ---------------------------------------------------------------------------
+// Расчёт: все отмеченные модели параллельно, у каждой своя строка статуса
+// ---------------------------------------------------------------------------
+async function errorText(resp) {
+  const txt = await resp.text();
+  try {
+    const j = JSON.parse(txt);
+    if (Array.isArray(j.detail)) return j.detail.map(d => `${(d.loc || []).filter(x => x !== "body").join(".")}: ${d.msg}`).join("; ");
+    if (j.detail) return String(j.detail);
+  } catch (e) { /* не JSON */ }
+  return txt.slice(0, 300) || resp.statusText;
+}
+
+async function run() {
+  const ids = selectedIds();
+  const status = $("run-status");
+  status.innerHTML = "";
+  if (!ids.length) { status.append(el("div", { class: "err", text: "Отметьте хотя бы одну модель." })); return; }
+  const params = collectParams();
+  const errs = validate(params);
+  if (errs.length) { status.append(el("div", { class: "err", text: errs.join("\n") })); return; }
+
+  cancel();
+  const runId = ++state.runId;
+  const extra = collectExtra();
+  setBusy(true, ids);
+  const rows = {};
+  for (const id of ids) {
+    rows[id] = el("div", {}, el("span", { class: "spinner" }), el("span", { text: modelName(id) + ": считается…" }));
+    status.append(rows[id]);
+  }
+  const results = {};
+  await Promise.all(ids.map(async id => {
+    const ctrl = new AbortController();
+    state.controllers.push(ctrl);
+    const timer = setTimeout(() => ctrl.abort("timeout"), REQUEST_TIMEOUT_MS);
+    const t0 = performance.now();
+    try {
+      const resp = await fetch("/simulate", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+        body: JSON.stringify({ model_id: id, params: { ...params, extra: extra[id] || {} } }),
+      });
+      if (!resp.ok) throw new Error(`ошибка сервера ${resp.status}: ${await errorText(resp)}`);
+      const r = await resp.json();
+      const problem = checkResult(r, modelById(id)?.dim || 1);
+      if (problem) throw new Error("ответ не по контракту: " + problem);
+      results[id] = r;
+      if (runId === state.runId) rows[id].replaceChildren(el("span", { class: "ok", text: "✓" }), el("span", { text: `${modelName(id)}: готово за ${fmt((performance.now() - t0) / 1000, 2)} с` }));
+    } catch (e) {
+      let msg = e.message;
+      if (ctrl.signal.aborted) msg = ctrl.signal.reason === "timeout" ? `нет ответа за ${REQUEST_TIMEOUT_MS / 1000} с` : "отменено";
+      else if (e instanceof TypeError) msg = "сервер не отвечает (запущен ли uvicorn?)";
+      if (runId === state.runId) rows[id].replaceChildren(el("span", { class: "fail", text: "✗" }), el("span", { class: "fail", text: `${modelName(id)}: ${msg}` }));
+    } finally { clearTimeout(timer); }
+  }));
+  if (runId !== state.runId) return;     // запустили новый расчёт, этот устарел
+  state.controllers = [];
+  setBusy(false);
+  if (Object.keys(results).length) showResults(results, params);
+}
+function cancel() { state.controllers.forEach(c => c.abort("cancel")); state.controllers = []; }
+function setBusy(on, ids = []) {
+  $("run").disabled = on; $("cancel").disabled = !on;
+  $("overlay-1d").classList.toggle("on", on && ids.some(id => (modelById(id)?.dim || 1) === 1));
+  $("overlay-2d").classList.toggle("on", on && ids.some(id => modelById(id)?.dim === 2));
+}
+function checkResult(r, dim) {
+  if (!r || !Array.isArray(r.x) || !Array.isArray(r.t) || !Array.isArray(r.eta) || !Array.isArray(r.h)) return "нужны массивы x, t, eta, h";
+  if (r.eta.length !== r.t.length) return `кадров в eta ${r.eta.length}, а моментов в t ${r.t.length}`;
+  if (!r.t.length) return "нет ни одного кадра";
+  if (dim === 1) {
+    if (r.h.length !== r.x.length) return `длина h ${r.h.length}, а x ${r.x.length}`;
+    if (!Array.isArray(r.eta[0]) || r.eta[0].length !== r.x.length) return "eta[кадр] должен быть длины x";
+  } else {
+    if (!Array.isArray(r.y)) return "у 2D-модели нужен массив y";
+    if (!Array.isArray(r.eta[0]?.[0]) || r.eta[0].length !== r.y.length || r.eta[0][0].length !== r.x.length) return "у 2D-модели eta[кадр][iy][ix] размером y × x";
+    if (!Array.isArray(r.h[0]) || r.h.length !== r.y.length) return "у 2D-модели h[iy][ix]";
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Показ результатов и анимация
+// ---------------------------------------------------------------------------
+function showResults(results, params) {
+  pause();
+  state.results = results;
+  state.params = params;
+  const done = models.map(m => m.id).filter(id => results[id]);     // порядок как в списке моделей
+  state.ids1d = done.filter(id => modelById(id).dim === 1);
+  state.id2d = done.find(id => modelById(id).dim === 2) || null;
+
+  // общая шкала времени для ползунка: от первого до последнего кадра, кадров — как у самой подробной модели
+  const all = Object.values(results);
+  const t0 = Math.min(...all.map(r => r.t[0])), t1 = Math.max(...all.map(r => r.t[r.t.length - 1]));
+  const n = Math.max(2, ...all.map(r => r.t.length));
+  state.tGrid = Array.from({ length: n }, (_, i) => t0 + (t1 - t0) * i / (n - 1));
+  $("time").max = n - 1; $("time").disabled = false; $("play").disabled = false;
+
+  draw1d();
+  fillDiffSelects();
+  computeDiff();
+  draw2d();
+  setFrame(0);
+}
+
+function draw1d() {
+  const ids = state.ids1d;
+  $("card-1d").style.display = ids.length || !state.id2d ? "" : "none";
+  $("card-diff").style.display = ids.length || !state.id2d ? "" : "none";
+  Plotly.purge("wave");
+  if (!ids.length) { $("wave").innerHTML = '<div class="empty">Нет посчитанных одномерных моделей.</div>'; return; }
+  $("wave").innerHTML = "";
+  let amp = 0;
+  for (const id of ids) for (const row of state.results[id].eta) for (const v of row) if (isFinite(v) && Math.abs(v) > amp) amp = Math.abs(v);
+  amp = (amp || state.params.a || 1) * 1.15;
+  const base = state.results[ids[0]];
+  const hs = base.h.filter(isFinite);
+  const hmax = Math.max(...hs, 0.01), hmin = Math.min(...hs, 0);
+  const floor = -hmax * 1.12;
+  const traces = ids.map(id => ({
+    x: state.results[id].x, y: state.results[id].eta[0], mode: "lines", name: modelName(id),
+    line: { color: color[id], width: 2 }, xaxis: "x", yaxis: "y",
+  }));
+  traces.push(
+    { x: base.x, y: base.x.map(() => floor), mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false, xaxis: "x", yaxis: "y2" },
+    { x: base.x, y: base.h.map(h => -h), mode: "lines", name: "дно −h(x)", line: { color: "#7a5a33", width: 1.5 }, fill: "tonexty", fillcolor: "#c9a77c", xaxis: "x", yaxis: "y2" },
+    { x: base.x, y: waterLine(base, 0), mode: "lines", name: "вода (" + modelName(ids[0]) + ")", line: { color: "#2b73b8", width: 1 }, fill: "tonexty", fillcolor: "rgba(110,170,230,.55)", xaxis: "x", yaxis: "y2" },
+  );
+  Plotly.newPlot("wave", traces, {
+    margin: { l: 60, r: 20, t: 10, b: 45 },
+    xaxis: { title: { text: "x, м" }, anchor: "y2" },
+    yaxis: { title: { text: "η, м" }, range: [-amp, amp], domain: [0.42, 1] },
+    yaxis2: { title: { text: "z, м (дно в масштабе)" }, domain: [0, 0.34], range: [floor, Math.max(amp, -hmin) + 0.08 * hmax] },
+    legend: { orientation: "h", y: 1.1, x: 0 },
+    hovermode: "x",
+  }, { responsive: true, displaylogo: false });
+}
+function waterLine(r, i) { return r.eta[i].map((e, j) => Math.max(e, -r.h[j])); }
+
+function setFrame(i) {
+  state.frame = i;
+  const t = state.tGrid[i] ?? 0;
+  $("time").value = i;
+  $("time-label").textContent = "t = " + fmtTime(t);
+  const ids = state.ids1d;
+  if (ids.length && $("wave").data) {
+    const ys = ids.map(id => { const r = state.results[id]; return r.eta[nearestIndex(r.t, t)]; });
+    const base = state.results[ids[0]];
+    ys.push(waterLine(base, nearestIndex(base.t, t)));
+    const idx = ids.map((_, k) => k).concat(ids.length + 2);
+    Plotly.restyle("wave", { y: ys }, idx);
+  }
+  if (state.diff && $("diff").data) {
+    const k = nearestIndex(state.diff.t, t);
+    Plotly.restyle("diff", { x: [[state.diff.t[k]]], y: [[state.diff.d[k]]] }, [1]);
+  }
+  if (state.id2d && $("map").data) update2dFrame(t);
+}
+
+function play() {
+  if (!state.tGrid.length) return;
+  if (state.frame >= state.tGrid.length - 1) setFrame(0);
+  state.playing = true; state.lastTs = 0; state.acc = 0;
+  $("play").textContent = "❚❚ Пауза";
+  requestAnimationFrame(tick);
+}
+function pause() { state.playing = false; $("play").textContent = "▶ Пуск"; }
+function tick(ts) {
+  if (!state.playing) return;
+  if (state.lastTs) {
+    state.acc += (ts - state.lastTs) / 1000 * FPS_AT_X1 * Number($("speed").value);
+    const step = Math.floor(state.acc);
+    if (step > 0) {
+      state.acc -= step;
+      const next = state.frame + step;
+      if (next >= state.tGrid.length - 1) { setFrame(state.tGrid.length - 1); pause(); return; }
+      setFrame(next);
+    }
+  }
+  state.lastTs = ts;
+  requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------------------
+// Разность двух моделей (раздел 6.1)
+// ---------------------------------------------------------------------------
+function fillDiffSelects() {
+  const ids = state.ids1d;
+  for (const [sel, k] of [[$("diff-a"), 0], [$("diff-b"), 1]]) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    for (const id of ids) sel.append(el("option", { value: id, text: modelName(id) }));
+    sel.value = ids.includes(prev) ? prev : (ids[k] ?? ids[0] ?? "");
+  }
+  // по умолчанию: первая нелинейная модель минус линейная
+  if (ids.includes("linear") && ids.length > 1 && !(ids.includes(state.diffChoice?.[0]) && ids.includes(state.diffChoice?.[1]))) {
+    $("diff-a").value = ids.find(i => i !== "linear"); $("diff-b").value = "linear";
+  }
+  if ($("diff-a").value === $("diff-b").value && ids.length > 1) $("diff-b").value = ids.find(i => i !== $("diff-a").value);
+}
+function computeDiff() {
+  const A = $("diff-a").value, B = $("diff-b").value;
+  state.diff = null;
+  $("diff-summary").textContent = "";
+  Plotly.purge("diff");
+  if (state.ids1d.length < 2 || !A || !B || A === B) {
+    $("diff").innerHTML = `<div class="empty">${state.ids1d.length < 2 ? "Нужно хотя бы две посчитанные одномерные модели." : "Выберите две разные модели."}</div>`;
+    return;
+  }
+  const ra = state.results[A], rb = state.results[B];
+  const a = state.params.a || 1;
+  const sameX = ra.x.length === rb.x.length && ra.x.every((v, i) => Math.abs(v - rb.x[i]) <= 1e-9 * (1 + Math.abs(v)));
+  const d = ra.t.map((t, i) => {
+    const ea = ra.eta[i], eb = rb.eta[nearestIndex(rb.t, t)];
+    let m = 0;
+    for (let j = 0; j < ra.x.length; j++) {
+      const v = Math.abs(ea[j] - (sameX ? eb[j] : interp(rb.x, eb, ra.x[j])));
+      if (v > m) m = v;
+    }
+    return m / a;
+  });
+  state.diff = { a: A, b: B, t: ra.t, d };
+  const n = estimates(state.params);
+  const i10 = d.findIndex(v => v > 0.1);
+  const dmax = Math.max(...d.filter(isFinite), 0.15);
+  const shapes = [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 0.1, y1: 0.1, line: { color: "#999", dash: "dot" } }];
+  const ann = [{ xref: "paper", x: 1, y: 0.1, text: "d = 0,1", showarrow: false, xanchor: "right", yanchor: "bottom", font: { size: 11, color: "#777" } }];
+  if (state.params.bottom === "flat" && isFinite(n.tStar) && n.tStar <= ra.t[ra.t.length - 1]) {
+    shapes.push({ type: "line", x0: n.tStar, x1: n.tStar, yref: "paper", y0: 0, y1: 1, line: { color: "#d98200", dash: "dash" } });
+    ann.push({ x: n.tStar, yref: "paper", y: 1, text: "t*", showarrow: false, yanchor: "bottom", font: { color: "#d98200" } });
+  }
+  $("diff").innerHTML = "";
+  Plotly.newPlot("diff", [
+    { x: ra.t, y: d, mode: "lines", name: "d(t)", line: { color: color[A], width: 2 } },
+    { x: [ra.t[0]], y: [d[0]], mode: "markers", marker: { size: 9, color: "#000" }, showlegend: false, hoverinfo: "skip" },
+  ], { margin: { l: 55, r: 20, t: 18, b: 40 }, xaxis: { title: { text: "t, с" } }, yaxis: { title: { text: "d" }, range: [0, dmax * 1.1] }, shapes, annotations: ann, showlegend: false },
+  { responsive: true, displaylogo: false });
+  $("diff-summary").textContent = i10 >= 0
+    ? `«${modelName(A)}» и «${modelName(B)}» расходятся больше чем на 10% амплитуды с момента t₁₀ ≈ ${fmtTime(ra.t[i10])}` + (isFinite(n.tStar) ? ` (t* = ${fmtTime(n.tStar)}).` : ".")
+    : `За время расчёта расхождение не превысило 0,1 (максимум ${fmt(Math.max(...d))}).`;
+}
+
+// ---------------------------------------------------------------------------
+// 2D-карта
+// ---------------------------------------------------------------------------
+const MAP_TRACE = { eta: 0, land: 1, coast: 2, zone: 3, places: 4, point: 5 };
+
+function draw2d() {
+  const id = state.id2d;
+  $("card-2d").style.display = id ? "" : "none";
+  Plotly.purge("map"); Plotly.purge("point");
+  if (!id) return;
+  const r = state.results[id];
+  $("map-model").textContent = modelName(id);
+  const ny = r.y.length, nx = r.x.length;
+  // амплитуда в каждом узле за всё время: для шкалы и для зоны a/h
+  let amp = 0;
+  const maxAbs = r.h.map(row => row.map(() => 0));
+  for (const fr of r.eta) for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+    const v = Math.abs(fr[iy][ix]);
+    if (isFinite(v) && r.h[iy][ix] > 0) { if (v > maxAbs[iy][ix]) maxAbs[iy][ix] = v; if (v > amp) amp = v; }
+  }
+  r._maxAbs = maxAbs; r._shown = 0;
+  amp = amp || 1;
+  const xs = r.x.map(v => v / 1000), ys = r.y.map(v => v / 1000);
+  r._xs = xs; r._ys = ys;
+  const marks = PLACES.map(p => ({ ...p, ...lonLatToXY(p.lon, p.lat) }))
+    .filter(p => p.x >= Math.min(...r.x) && p.x <= Math.max(...r.x) && p.y >= Math.min(...r.y) && p.y <= Math.max(...r.y));
+  if (!state.point || state.point.id !== id) {      // по умолчанию — ближайший к Петербургу мокрый узел
+    const spb = marks.find(p => p.name === "Петербург");
+    state.point = { id, ...(spb ? nearestWet(r, spb.x, spb.y) : { ix: nx >> 1, iy: ny >> 1 }) };
+  }
+  const traces = [
+    { type: "heatmap", x: xs, y: ys, z: maskedEta(r, 0), zmin: -amp, zmax: amp, colorscale: "RdBu", reversescale: false,   // подъём — красный, опускание — синий
+      colorbar: { title: { text: "η, м", side: "right" }, len: 0.9 },
+      hovertemplate: "x = %{x:.1f} км<br>y = %{y:.1f} км<br>η = %{z:.3f} м<extra></extra>" },
+    { type: "heatmap", x: xs, y: ys, z: r.h.map(row => row.map(h => (h > 0 ? null : 1))), colorscale: [[0, "#d9cfb8"], [1, "#d9cfb8"]], showscale: false, hoverinfo: "skip" },
+    { type: "contour", x: xs, y: ys, z: r.h, showscale: false, hoverinfo: "skip",
+      contours: { start: 0.01, end: 0.01, size: 1, coloring: "none" }, line: { color: "#3d3d3d", width: 1.4 } },
+    zoneTrace(r),
+    { type: "scatter", mode: "markers+text", x: marks.map(p => p.x / 1000), y: marks.map(p => p.y / 1000), text: marks.map(p => p.name),
+      textposition: "top center", marker: { size: 11, color: "#000", symbol: "star" }, textfont: { size: 12 }, hoverinfo: "text", showlegend: false },
+    { type: "scatter", mode: "markers", x: [xs[state.point.ix]], y: [ys[state.point.iy]], hoverinfo: "skip", showlegend: false,
+      marker: { size: 13, color: "rgba(0,0,0,0)", line: { color: "#ff00aa", width: 2.5 } } },
+  ];
+  $("map").innerHTML = "";
+  Plotly.newPlot("map", traces, {
+    margin: { l: 55, r: 10, t: 10, b: 45 }, showlegend: false,
+    xaxis: { title: { text: "x, км" }, constrain: "domain" }, yaxis: { title: { text: "y, км" }, scaleanchor: "x" },
+  }, { responsive: true, displaylogo: false });
+  $("map").on("plotly_click", ev => {
+    const pt = ev.points?.[0];
+    if (!pt) return;
+    state.point = { id, ix: nearestIndex(xs, pt.x), iy: nearestIndex(ys, pt.y) };
+    Plotly.restyle("map", { x: [[xs[state.point.ix]]], y: [[ys[state.point.iy]]] }, [MAP_TRACE.point]);
+    drawPoint();
+  });
+  drawPoint();
+}
+function maskedEta(r, i) { return r.eta[i].map((row, iy) => row.map((v, ix) => (r.h[iy][ix] > 0 ? v : null))); }
+function zoneTrace(r) {
+  const thr = Number($("zone-thr").value) || 0.1;
+  const ratio = r._maxAbs.map((row, iy) => row.map((v, ix) => (r.h[iy][ix] > 0 ? v / r.h[iy][ix] : 0)));
+  return { type: "contour", x: r._xs || r.x.map(v => v / 1000), y: r._ys || r.y.map(v => v / 1000), z: ratio, showscale: false, hoverinfo: "skip",
+    contours: { start: thr, end: thr, size: 1, coloring: "none" }, line: { color: "#a000a0", width: 2.2, dash: "dash" } };
+}
+function nearestWet(r, x, y) {
+  let best = { ix: 0, iy: 0 }, bd = Infinity;
+  for (let iy = 0; iy < r.y.length; iy++) for (let ix = 0; ix < r.x.length; ix++) {
+    if (!(r.h[iy][ix] > 0)) continue;
+    const d = (r.x[ix] - x) ** 2 + (r.y[iy] - y) ** 2;
+    if (d < bd) { bd = d; best = { ix, iy }; }
+  }
+  return best;
+}
+function drawPoint() {
+  const r = state.results[state.id2d], { ix, iy } = state.point;
+  const series = r.eta.map(fr => fr[iy][ix]);
+  const k = nearestIndex(r.t, state.tGrid[state.frame] ?? r.t[0]);
+  const dry = !(r.h[iy][ix] > 0);
+  Plotly.newPlot("point", [
+    { x: r.t, y: series, mode: "lines", line: { color: color[state.id2d], width: 2 }, name: "η" },
+    { x: [r.t[k]], y: [series[k]], mode: "markers", marker: { size: 9, color: "#000" }, hoverinfo: "skip" },
+  ], {
+    margin: { l: 55, r: 15, t: 40, b: 40 }, showlegend: false, xaxis: { title: { text: "t, с" } }, yaxis: { title: { text: "η, м" } },
+    title: { text: `Уровень в точке x = ${fmt(r.x[ix] / 1000)} км, y = ${fmt(r.y[iy] / 1000)} км<br>${dry ? "суша" : "h = " + fmt(r.h[iy][ix]) + " м"}`, font: { size: 13 } },
+  }, { responsive: true, displaylogo: false });
+}
+function update2dFrame(t) {
+  const r = state.results[state.id2d];
+  const k = nearestIndex(r.t, t);
+  if (r._shown !== k) { Plotly.restyle("map", { z: [maskedEta(r, k)] }, [MAP_TRACE.eta]); r._shown = k; }
+  if ($("point").data) {
+    const { ix, iy } = state.point;
+    Plotly.restyle("point", { x: [[r.t[k]]], y: [[r.eta[k][iy][ix]]] }, [1]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Оценки по параметрам (разделы 1 и 3 теории)
+// ---------------------------------------------------------------------------
+function estimates(p) {
+  const h = p.depth, a = p.a, lam = p.wavelength;
+  const c0 = Math.sqrt(G * h), eps = a / h, kh = 2 * Math.PI * h / lam, mu = (h / lam) ** 2;
+  const Ur = a * lam ** 2 / h ** 3;
+  const tStar = lam / (3 * Math.PI * eps * c0), xStar = lam / (3 * Math.PI * eps), tD = lam / (mu * c0);
+  return { h, a, lam, c0, eps, kh, mu, Ur, tStar, xStar, tD };
+}
+function updateNumbers() {
+  const p = collectParams();
+  const tbl = $("numbers"), warn = $("numbers-warn"), hint = $("ur-hint");
+  tbl.innerHTML = ""; warn.innerHTML = ""; hint.innerHTML = "";
+  if (!(p.depth > 0 && p.wavelength > 0 && p.a >= 0)) {
+    tbl.append(el("tr", {}, el("td", { text: "Нужны a ≥ 0, λ > 0, h > 0" })));
+    state.recommended = []; renderLadder(); return;
+  }
+  const n = estimates(p);
+  const rows = [
+    ["ε = a/h — нелинейность", fmt(n.eps)],
+    ["kh = 2πh/λ", fmt(n.kh)],
+    ["μ = (h/λ)² — дисперсия", fmt(n.mu)],
+    ["Ur = aλ²/h³ — число Урселла", fmt(n.Ur)],
+    ["c₀ = √(gh)", fmt(n.c0) + " м/с"],
+    ["t* = λ/(3π·ε·c₀) — опрокидывание", fmtTime(n.tStar)],
+    ["x* = λ/(3π·ε)", fmtLen(n.xStar)],
+    ["t_d = λ/(μ·c₀) — дисперсия", fmtTime(n.tD)],
+  ];
+  for (const [k, v] of rows) tbl.append(el("tr", {}, el("td", { text: k }), el("td", { text: v })));
+  if (n.kh > 0.3) warn.append(el("div", { class: "warn", text: `Не мелкая вода: kh = ${fmt(n.kh)} > 0,3. Модели мелкой воды к такой волне неприменимы; при этой глубине нужна λ ≳ ${fmtLen(20 * n.h)}.` }));
+  if (2 * n.a / n.h > 0.78) warn.append(el("div", { class: "warn", text: `Высота волны 2a/h = ${fmt(2 * n.a / n.h)} > 0,78: по критерию Мак-Кауэна волна обрушивается (раздел 4.2).` }));
+  if (n.a > 0 && n.tStar > p.t_end) warn.append(el("div", { class: "warn", text: `t* = ${fmtTime(n.tStar)} больше t_end = ${fmtTime(p.t_end)}: фронт не успеет укрутиться за время расчёта.` }));
+
+  const rec = recommendation(n);
+  hint.append(el("b", { text: "Какая модель подходит. " }), rec.text);
+  state.recommended = rec.ids;
+  renderLadder();
+}
+function recommendation(n) {                // раздел 3
+  if (n.a === 0) return { ids: ["linear"], text: "a = 0: волны нет." };
+  if (n.Ur > 30) return { ids: ["saint_venant", "shallow_2d"], text: `Ur = ${fmt(n.Ur)} ≫ 1: укручение наступает раньше дисперсии, волна обрушивается — достаточно Сен-Венана (на карте залива — мелкая вода 2D). Линейная — база сравнения.` };
+  if (n.Ur >= 1) return { ids: ["kdv", "boussinesq"], text: `Ur = ${fmt(n.Ur)}, порядка 1–30: нелинейность и дисперсия сравнимы — нужна КдФ или Буссинеск, вместо обрушения появляются солитоны.` };
+  return { ids: ["linear"], text: `Ur = ${fmt(n.Ur)} ≪ 1: доминирует дисперсия, волна почти линейная — хватает линейной модели${n.kh > 0.3 ? " (но kh > 0,3, нужна полная дисперсионная теория)" : ""}.` };
+}
+
+// ---------------------------------------------------------------------------
+// Описания моделей и лестница
+// ---------------------------------------------------------------------------
+function renderDescriptions() {
+  const box = $("descriptions");
+  box.innerHTML = "";
+  if (!models.length) { box.append(el("div", { class: "muted", text: "Нет моделей." })); return; }
+  for (const m of models) {
+    const info = MODEL_INFO[m.id];
+    const head = el("h4", {}, el("span", { class: "swatch", style: `background:${color[m.id]}` }), modelName(m.id),
+      el("span", { class: "badge", text: m.id }));
+    if (info) head.append(el("span", { class: "badge", text: info.step }));
+    if (m.dim === 2) head.append(el("span", { class: "badge", text: "2D" }));
+    const div = el("div", { class: "model-desc", id: "desc-" + m.id }, head);
+    if (info) div.append(el("div", { text: info.text }));
+    if (m.description) div.append(el("div", { class: info ? "server" : "", text: m.description }));
+    if (m.extra.length) div.append(el("div", { class: "hint", text: "Доп. параметры: " + m.extra.map(p => p.label + (p.unit ? ", " + p.unit : "")).join("; ") }));
+    box.append(div);
+  }
+  renderMath(box);
+}
+
+function renderLadder() {
+  // схема из раздела 6 теории: линейная — база сравнения, 1 → 2 → 3 по физике, 1 → 4 по реалистичности
+  const W = 180, H = 74;
+  const boxes = [
+    { id: "linear",       x: 10,  y: 130, l1: "База сравнения", l2: "Линейная 1D", l3: "бег без искажения" },
+    { id: "saint_venant", x: 210, y: 20,  l1: "Ступень 1", l2: "Сен-Венан 1D", l3: "укручение, бор, накат" },
+    { id: "kdv",          x: 420, y: 20,  l1: "Ступень 2", l2: "КдФ", l3: "+ дисперсия, солитоны" },
+    { id: "boussinesq",   x: 630, y: 20,  l1: "Ступень 3", l2: "Буссинеск", l3: "дисперсия, переменное дно" },
+    { id: "shallow_2d",   x: 420, y: 130, l1: "Ступень 4", l2: "Мелкая вода 2D", l3: "карта, ветер, нагон" },
+  ];
+  const b = Object.fromEntries(boxes.map(x => [x.id, x]));
+  const have = new Set(models.map(m => m.id)), rec = new Set(state.recommended);
+  const line = (d, dashed) => `<path d="${d}" stroke="${dashed ? "#9aa6b2" : "#3b5670"}" stroke-width="1.6" fill="none"${dashed ? ' stroke-dasharray="5 4"' : ""} marker-end="url(#arr${dashed ? "d" : ""})"/>`;
+  let svg = `<svg viewBox="0 0 820 235" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3b5670"/></marker>
+    <marker id="arrd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9aa6b2"/></marker></defs>`;
+  const mid = o => o.y + H / 2;
+  svg += line(`M${b.saint_venant.x + W},${mid(b.saint_venant)} L${b.kdv.x},${mid(b.kdv)}`);
+  svg += line(`M${b.kdv.x + W},${mid(b.kdv)} L${b.boussinesq.x},${mid(b.boussinesq)}`);
+  svg += line(`M${b.saint_venant.x + W / 2},${b.saint_venant.y + H} L${b.saint_venant.x + W / 2},${mid(b.shallow_2d)} L${b.shallow_2d.x},${mid(b.shallow_2d)}`);
+  svg += line(`M${b.linear.x + W / 2},${b.linear.y} L${b.linear.x + W / 2},${mid(b.saint_venant)} L${b.saint_venant.x},${mid(b.saint_venant)}`, true);
+  svg += `<text x="${b.linear.x + W / 2 + 6}" y="${b.linear.y - 18}" font-size="11" fill="#66727f">расхождение d(t)</text>`;
+  svg += `<text x="10" y="228" font-size="11" fill="#66727f">1 → 2 → 3: физика волны (нелинейность, затем дисперсия);  1 → 4: реалистичность обстановки</text>`;
+  for (const o of boxes) {
+    const cls = ["box", have.has(o.id) ? "available" : "missing", rec.has(o.id) ? "recommended" : ""].join(" ");
+    svg += `<g class="${cls}" data-id="${o.id}"><title>${have.has(o.id) ? "есть на сервере — щёлкните, чтобы отметить" : "этой модели пока нет на сервере"}</title>
+      <rect x="${o.x}" y="${o.y}" width="${W}" height="${H}" rx="8"/>
+      <text x="${o.x + 10}" y="${o.y + 18}" fill="#66727f">${o.l1}</text>
+      <text class="title" x="${o.x + 10}" y="${o.y + 38}">${o.l2}</text>
+      <text x="${o.x + 10}" y="${o.y + 58}">${o.l3}</text></g>`;
+  }
+  const box = $("ladder");
+  box.innerHTML = svg + "</svg>";
+  box.querySelectorAll(".box.available").forEach(g => g.addEventListener("click", () => {
+    const cb = document.querySelector(`#models input[value="${g.dataset.id}"]`);
+    if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }
+    $("desc-" + g.dataset.id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Пресеты
+// ---------------------------------------------------------------------------
+function initPresets() {
+  for (const p of PRESETS) $("preset").append(el("option", { value: p.id, text: p.name }));
+  $("preset").addEventListener("change", () => {
+    const p = PRESETS.find(x => x.id === $("preset").value);
+    $("preset-note").textContent = p ? p.note : "";
+    if (!p) return;
+    for (const [k, v] of Object.entries(p.params)) if ($(k)) $(k).value = v;
+    const avail = (p.models || []).filter(id => modelById(id));
+    if (avail.length) document.querySelectorAll("#models input").forEach(cb => cb.checked = avail.includes(cb.value));
+    renderExtra();
+    if (p.extra) for (const m of models) for (const ep of m.extra) {
+      const input = $(`extra__${m.id}__${ep.name}`);
+      if (input && p.extra[ep.name] !== undefined) input.value = p.extra[ep.name];
+    }
+    syncBottom(); updateNumbers();
+  });
+}
+function syncBottom() { $("depth_shore").disabled = $("bottom").value !== "slope"; }
+
+// ---------------------------------------------------------------------------
+// События
+// ---------------------------------------------------------------------------
+$("run").addEventListener("click", run);
+$("cancel").addEventListener("click", () => { cancel(); setBusy(false); });
+$("play").addEventListener("click", () => (state.playing ? pause() : play()));
+$("time").addEventListener("input", () => { pause(); setFrame(Number($("time").value)); });
+for (const s of ["diff-a", "diff-b"]) $(s).addEventListener("change", () => {
+  state.diffChoice = [$("diff-a").value, $("diff-b").value];     // запоминаем выбор пользователя
+  computeDiff(); setFrame(state.frame);
+});
+$("zone-thr").addEventListener("change", () => {
+  if (!state.id2d || !$("map").data) return;
+  const z = zoneTrace(state.results[state.id2d]);
+  Plotly.restyle("map", { z: [z.z], contours: [z.contours] }, [MAP_TRACE.zone]);
+});
+$("bottom").addEventListener("change", syncBottom);
+for (const k of Object.keys(FIELDS)) $(k).addEventListener("input", () => { $("preset").value = ""; $("preset-note").textContent = ""; updateNumbers(); });
+document.querySelector("aside").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT") run(); });
+
+(async () => {
+  initPresets();
+  await loadDefaults();
+  syncBottom();
+  updateNumbers();
+  await loadModels();
+})();
+</script>
+</body>
+</html>
