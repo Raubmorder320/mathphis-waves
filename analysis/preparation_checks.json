@@ -1,0 +1,76 @@
+{
+  "source_sha256": "c5ae750136a10bac3f40a96ee48a9a18952ef5c9952d00f988ad921225e3ed1e",
+  "shape_yx": [
+    50,
+    150
+  ],
+  "dx_m": 1260.2109093133731,
+  "dy_m": 2668.681925604794,
+  "bay_wet_cell_count": 18,
+  "bay_depth_percentiles_m": [
+    2.839969843703753,
+    3.3250267255931254,
+    3.8166823880635046,
+    3.961105701929326,
+    5.200167533686346
+  ],
+  "gulf_connected_to_bay": true,
+  "kotlin_retained": true,
+  "dam_correction_applied": false,
+  "profile_nodes": 801,
+  "profile_length_m": 181420.7922515762,
+  "profile_dx_m": 226.77599031447025,
+  "profile_shore_lonlat": [
+    30.212464430006804,
+    59.95
+  ],
+  "profile_min_wet_depth_m": 1.2049073661053389,
+  "profile_max_depth_m": 58.04220689004444,
+  "profile_start_depth_m": 30.08227882645778,
+  "nearshore_slope_10_to_1_km": 0.0002500784278828087,
+  "nearshore_slope_12_to_2_km": 0.00019669360696536646,
+  "profile_crosses_source_land": false,
+  "shore_method": "first wet/dry boundary in either source or reduced grid",
+  "waypoints_lonlat": [
+    [
+      27.011333333333333,
+      60.08
+    ],
+    [
+      28.0,
+      60.1
+    ],
+    [
+      28.8,
+      60.07
+    ],
+    [
+      29.4,
+      60.05
+    ],
+    [
+      29.6,
+      59.97
+    ],
+    [
+      29.9,
+      59.96
+    ],
+    [
+      30.15,
+      59.95
+    ],
+    [
+      30.3,
+      59.95
+    ]
+  ],
+  "coarsening": "area-weighted wet mean; water fraction >= 0.5",
+  "projection": "local equirectangular, R=6371008.8 m, lat0=60 deg",
+  "gulf_bathymetry.npz": {
+    "bytes": 38739
+  },
+  "gulf_profile.npz": {
+    "bytes": 35637
+  }
+}
