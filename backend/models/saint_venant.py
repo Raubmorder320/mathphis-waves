@@ -13,64 +13,26 @@ Audusse et al. (2004), чтобы покоящаяся вода над любы�
 
 Проверки из TASKS.md запускаются командой:  python -m backend.models.saint_venant
 """
-from pathlib import Path
-
 import numpy as np
 
+from backend.common import G, setup, u_simple_wave
 from backend.contract import Params, Result, WaveModel
 
-G = 9.81       # ускорение свободного падения, м/с²
 CFL = 0.5      # число Куранта
-N_PACKET = 3   # число периодов в пакете для дна slope и gulf
 H_DRY = 1e-6   # порог сухой ячейки, м
 H_EPS = 1e-3   # ниже этой глубины скорость считается со сглаживанием, м
 
 
-# --- Постановка: сетка, дно, начальное условие ------------------------------
-# ВРЕМЕННО. По TASKS.md всё это модели берут из backend/common.py. Пока его нет
-# в main, постановка задана здесь по описанию из раздела «Общая постановка
-# расчёта» и совпадает с моделью linear. Когда common.py появится, функция
-# _setup заменяется вызовами из него.
+# --- Постановка --------------------------------------------------------------
 
 def _setup(p: Params):
-    """Вернуть x, h(x), η₀(x), u₀(x) и признак периодических границ."""
-    bottom = getattr(p, "bottom", "flat")
-    k = 2 * np.pi / p.wavelength
+    """Вернуть x, h(x), η₀(x), u₀(x) и признак периодических границ (backend/common.py).
 
-    if bottom == "flat":
-        # Ровное дно, периодические границы, синусоида бежит вправо.
-        x = np.arange(p.nx) * (p.L / p.nx)
-        h = np.full(p.nx, float(p.depth))
-        eta0 = p.a * np.sin(k * x)
-        periodic = True
-    elif bottom in ("slope", "gulf"):
-        if bottom == "slope":
-            # Глубина линейно убывает к правому краю; при depth_shore ≤ 0 берег сухой.
-            depth_shore = getattr(p, "depth_shore", 1.0)
-            x = np.linspace(0.0, p.L, p.nx)
-            h = p.depth + (depth_shore - p.depth) * x / p.L
-        else:
-            # Реальный разрез залива к Невской губе (данные Влада).
-            path = Path(__file__).resolve().parents[2] / "data" / "gulf_profile.npz"
-            if not path.exists():
-                raise NotImplementedError("Дно 'gulf' появится вместе с data/gulf_profile.npz")
-            with np.load(path) as d:
-                xp, hp = np.asarray(d["x"], float), np.asarray(d["h"], float)
-            x = np.linspace(xp.min(), xp.max(), p.nx)
-            h = np.interp(x, xp, hp)
-        # Слева стартует пакет из нескольких периодов, на краях стенки.
-        s = x - x[0]
-        width = N_PACKET * p.wavelength
-        envelope = np.where(s < width, np.sin(np.pi * s / width) ** 2, 0.0)
-        eta0 = np.where(h > 0, p.a * envelope * np.sin(k * s), 0.0)
-        periodic = False
-    else:
-        raise NotImplementedError(f"Дно {bottom!r} не поддерживается")
-
-    # Простая волна, бегущая вправо: инвариант Римана u − 2√(gH) тот же, что в покое.
-    H0 = np.maximum(h + eta0, 0.0)
-    u0 = np.where(h > 0, 2 * (np.sqrt(G * H0) - np.sqrt(G * np.maximum(h, 0.0))), 0.0)
-    return x, h, eta0, u0, periodic
+    Начальная скорость — простая волна, бегущая вправо: инвариант Римана u − 2√(gH)
+    тот же, что в покое. Функцию использует и shallow_2d.
+    """
+    s = setup(p)
+    return s.x, s.h, s.eta0, u_simple_wave(s.h, s.eta0), s.periodic
 
 
 # --- Расчётное ядро: от контракта не зависит --------------------------------
