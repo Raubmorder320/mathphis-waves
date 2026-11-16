@@ -1,5 +1,6 @@
 """Список доступных моделей. Новая модель регистрируется одной строкой внизу файла."""
 from backend.contract import WaveModel
+from backend.models.boussinesq import BoussinesqModel
 from backend.models.demo import DemoModel
 from backend.models.kdv import KdVModel
 from backend.models.linear import LinearModel
@@ -16,6 +17,7 @@ def register(model: WaveModel) -> None:
 
 register(DemoModel())
 register(LinearModel())
+register(BoussinesqModel())
 register(KdVModel())
 register(SaintVenantModel())
 register(Shallow2DModel())
