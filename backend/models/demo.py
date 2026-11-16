@@ -1,23 +1,25 @@
 import numpy as np
 
+from backend.common import G, frame_times, setup
 from backend.contract import Params, Result, WaveModel
-
-G = 9.81  # ускорение свободного падения, м/с²
 
 
 class DemoModel(WaveModel):
     id = "demo"
-    name = "Демо: бегущая синусоида"
+    name = "Демо: перенос без искажения"
     description = (
-        "Демо для проверки интерфейса, настоящие модели пишет Ваня. "
-        "η = a·sin(k(x − c·t)), c = √(g·h), дно ровное."
+        "Заглушка для проверки страницы, не физика. Начальный профиль из общей постановки "
+        "просто сдвигается вправо со скоростью √(g·depth)."
     )
 
     def solve(self, p: Params) -> Result:
-        x = np.linspace(0, p.L, p.nx)
-        t = np.linspace(0, p.t_end, p.n_frames)
-        k = 2 * np.pi / p.wavelength
+        s = setup(p)
+        t = frame_times(p)
         c = np.sqrt(G * p.depth)
-        eta = p.a * np.sin(k * (x[None, :] - c * t[:, None]))
-        h = np.full_like(x, p.depth)
-        return Result(x=x.tolist(), t=t.tolist(), eta=eta.tolist(), h=h.tolist())
+        shifted = s.x[None, :] - c * t[:, None]
+        if s.periodic:
+            eta = np.array([np.interp(row, s.x, s.eta0, period=p.L) for row in shifted])
+        else:
+            eta = np.array([np.interp(row, s.x, s.eta0, left=0.0, right=0.0) for row in shifted])
+        eta = np.where(s.h[None, :] > 0, eta, 0.0)
+        return Result(x=s.x.tolist(), t=t.tolist(), eta=eta.tolist(), h=s.h.tolist())

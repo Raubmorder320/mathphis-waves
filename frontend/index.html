@@ -17,10 +17,12 @@
   <!-- Поля совпадают с Params из backend/contract.py -->
   <p>
     a, м <input id="a" type="number" step="any" value="0.5">
-    wavelength, м <input id="wavelength" type="number" step="any" value="20">
+    wavelength, м <input id="wavelength" type="number" step="any" value="100">
     depth, м <input id="depth" type="number" step="any" value="5">
-    L, м <input id="L" type="number" step="any" value="200">
-    t_end, с <input id="t_end" type="number" step="any" value="30">
+    bottom <select id="bottom"><option>flat</option><option>slope</option><option>gulf</option></select>
+    depth_shore, м <input id="depth_shore" type="number" step="any" value="1">
+    L, м <input id="L" type="number" step="any" value="1000">
+    t_end, с <input id="t_end" type="number" step="any" value="60">
     nx <input id="nx" type="number" value="400">
     n_frames <input id="n_frames" type="number" value="100">
   </p>
@@ -30,7 +32,7 @@
   <div id="plot" style="height: 500px"></div>
 
   <script>
-    const FIELDS = ["a", "wavelength", "depth", "L", "t_end", "nx", "n_frames"];
+    const FIELDS = ["a", "wavelength", "depth", "depth_shore", "L", "t_end", "nx", "n_frames"];
     const select = document.getElementById("model");
     const status = document.getElementById("status");
     let models = [];
@@ -48,6 +50,7 @@
 
     async function run() {
       const params = Object.fromEntries(FIELDS.map(f => [f, Number(document.getElementById(f).value)]));
+      params.bottom = document.getElementById("bottom").value;
       status.textContent = "Считаем...";
       const resp = await fetch("/simulate", {
         method: "POST",
