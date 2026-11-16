@@ -12,46 +12,10 @@
 """
 import numpy as np
 
+from backend.common import G, frame_times, setup, u_linear
 from backend.contract import Params, Result, WaveModel
 
-G = 9.81       # ускорение свободного падения, м/с²
 CFL = 0.99     # число Куранта (схема устойчива при значениях до 1)
-N_PACKET = 3   # число периодов в пакете для дна slope
-
-
-# --- Постановка: сетка, дно, начальное условие ------------------------------
-# ВРЕМЕННО. По TASKS.md всё это модели берут из backend/common.py. Пока его нет
-# в main, постановка задана здесь по описанию из раздела «Общая постановка
-# расчёта». Когда common.py появится, функция _setup заменяется вызовами из него.
-
-def _setup(p: Params):
-    """Вернуть x, h(x), η₀(x), u₀(x) и признак периодических границ."""
-    bottom = getattr(p, "bottom", "flat")
-    k = 2 * np.pi / p.wavelength
-
-    if bottom == "flat":
-        # Ровное дно, периодические границы, синусоида бежит вправо.
-        x = np.arange(p.nx) * (p.L / p.nx)
-        h = np.full(p.nx, float(p.depth))
-        eta0 = p.a * np.sin(k * x)
-        periodic = True
-    elif bottom == "slope":
-        # Глубина линейно убывает к правому краю, слева стартует пакет, на краях стенки.
-        depth_shore = getattr(p, "depth_shore", 1.0)
-        x = np.linspace(0.0, p.L, p.nx)
-        h = p.depth + (depth_shore - p.depth) * x / p.L
-        width = N_PACKET * p.wavelength
-        envelope = np.where(x < width, np.sin(np.pi * x / width) ** 2, 0.0)
-        eta0 = p.a * envelope * np.sin(k * x)
-        periodic = False
-    else:
-        raise NotImplementedError(
-            f"Дно {bottom!r} появится вместе с backend/common.py и данными из data/"
-        )
-
-    # Волна, бегущая вправо: u = η·√(g/h). Там, где воды нет, скорость нулевая.
-    u0 = np.where(h > 0, eta0 * np.sqrt(G / np.maximum(h, 1e-12)), 0.0)
-    return x, h, eta0, u0, periodic
 
 
 # --- Расчётное ядро: от контракта не зависит --------------------------------
@@ -135,10 +99,17 @@ class LinearModel(WaveModel):
     extra_params: list = []
 
     def solve(self, p: Params) -> Result:
-        x, h, eta0, u0, periodic = _setup(p)
-        t = np.linspace(0.0, p.t_end, p.n_frames)
-        eta = solve_linear(h, eta0, u0, x[1] - x[0], t, periodic)
-        return Result(x=x.tolist(), t=t.tolist(), eta=eta.tolist(), h=h.tolist())
+        s = setup(p)
+        t = frame_times(p)
+        # Линейная теория не описывает накат: берег — стенка в последнем мокром узле,
+        # на суше η = 0.
+        wet = int(np.argmin(s.h > 0)) if np.any(s.h <= 0) else len(s.x)
+        if wet < 2:
+            raise ValueError("У левого края нет воды: увеличьте depth")
+        eta = np.zeros((len(t), len(s.x)))
+        h, eta0 = s.h[:wet], s.eta0[:wet]
+        eta[:, :wet] = solve_linear(h, eta0, u_linear(h, eta0), s.dx, t, s.periodic)
+        return Result(x=s.x.tolist(), t=t.tolist(), eta=eta.tolist(), h=s.h.tolist())
 
 
 # --- Проверки «готово, когда» из TASKS.md -----------------------------------
