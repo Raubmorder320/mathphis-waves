@@ -76,8 +76,9 @@ def _setup(p: Params):
 # --- Расчётное ядро: от контракта не зависит --------------------------------
 
 def _minmod(a, b, c):
-    m = np.minimum(np.minimum(np.abs(a), np.abs(b)), np.abs(c))
-    return np.where((a * b > 0) & (b * c > 0), np.sign(a) * m, 0.0)
+    """Наименьшее по модулю из трёх, если знаки совпадают, иначе 0."""
+    return (np.maximum(np.minimum(np.minimum(a, b), c), 0.0)
+            + np.minimum(np.maximum(np.maximum(a, b), c), 0.0))
 
 
 def _faces(v):
@@ -87,16 +88,20 @@ def _faces(v):
     заметно сильнее: около 1% амплитуды за 10 длин волны при 100 ячейках на длину,
     и пакет, бегущий к берегу, не выдерживает закон Грина.
     """
-    dm, dp = np.diff(v)[:-1], np.diff(v)[1:]          # разности с западным и восточным соседом
+    dm, dp = np.diff(v)[..., :-1], np.diff(v)[..., 1:]  # разности с западным и восточным соседом
+    return _koren(dm, dp)
+
+
+def _koren(dm, dp):
+    """Приращения к восточной и западной граням по разностям с западным и восточным соседом."""
     return (0.5 * _minmod(2 * dm, (dm + 2 * dp) / 3, 2 * dp),
             -0.5 * _minmod(2 * dp, (2 * dm + dp) / 3, 2 * dm))
 
 
 def _velocity(H, q):
     """u = q/H без деления на почти нулевую глубину (Kurganov, Petrova 2007)."""
-    H4 = H ** 4
-    u = np.sqrt(2.0) * H * q / np.sqrt(H4 + np.maximum(H4, H_EPS ** 4))
-    return np.where(H > H_DRY, u, 0.0)
+    H2 = H * H
+    return np.where(H > H_DRY, 2.0 * H * q / (H2 + np.maximum(H2, H_EPS ** 2)), 0.0)
 
 
 def _hll(hl, ul, hr, ur):
