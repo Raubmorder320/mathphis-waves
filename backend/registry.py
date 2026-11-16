@@ -3,6 +3,8 @@ from backend.contract import WaveModel
 from backend.models.demo import DemoModel
 from backend.models.kdv import KdVModel
 from backend.models.linear import LinearModel
+from backend.models.saint_venant import SaintVenantModel
+from backend.models.shallow_2d import Shallow2DModel
 
 MODELS: dict[str, WaveModel] = {}  # id модели -> экземпляр модели
 
@@ -15,3 +17,5 @@ def register(model: WaveModel) -> None:
 register(DemoModel())
 register(LinearModel())
 register(KdVModel())
+register(SaintVenantModel())
+register(Shallow2DModel())
