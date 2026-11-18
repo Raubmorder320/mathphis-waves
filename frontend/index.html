@@ -48,6 +48,8 @@
     .badge { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #e7eef5; color: #3b5670; font-weight: 400; }
     .muted { color: var(--muted); }
     .hint { font-size: 12px; color: var(--muted); }
+    .story { white-space: pre-line; font-size: 13px; line-height: 1.5; background: #eef5fb; border-left: 3px solid var(--accent); border-radius: 4px; padding: 8px 10px; margin-top: 8px; }
+    .story:empty { display: none; }
     .warn { background: var(--warn-bg); color: var(--warn); border-radius: 5px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
     .err { background: var(--err-bg); color: var(--err); border-radius: 5px; padding: 6px 8px; margin: 6px 0; font-size: 13px; white-space: pre-wrap; }
     .numbers { width: 100%; border-collapse: collapse; }
@@ -62,7 +64,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .player { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .player input[type=range] { flex: 1; min-width: 200px; }
-    .player .time { min-width: 110px; font-variant-numeric: tabular-nums; }
+    .player .time { min-width: 220px; font-variant-numeric: tabular-nums; }
     .plot-wrap { position: relative; }
     .overlay { position: absolute; inset: 0; background: rgba(255,255,255,.65); display: none; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--accent); z-index: 5; }
     .overlay.on { display: flex; }
@@ -95,6 +97,12 @@
   <!-- ===================== Левая колонка: форма ===================== -->
   <aside>
     <div class="card">
+      <h2>Сценарий показа</h2>
+      <select id="preset"><option value="">— свои значения —</option></select>
+      <div id="preset-note" class="story"></div>
+    </div>
+
+    <div class="card">
       <h2>Модели</h2>
       <div id="models" class="models"><span class="muted">Загружаем список моделей…</span></div>
       <div id="models-error"></div>
@@ -102,9 +110,6 @@
 
     <div class="card">
       <h2>Параметры</h2>
-      <label class="row"><span>Пресет</span>
-        <select id="preset"><option value="">— свои значения —</option></select></label>
-      <div id="preset-note" class="hint"></div>
 
       <label class="row"><span>Амплитуда a, <small>м</small></span><input id="a" type="number" step="any" min="0"></label>
       <label class="row"><span>Длина волны λ, <small>м</small></span><input id="wavelength" type="number" step="any" min="0"></label>
@@ -182,7 +187,7 @@
       <div class="inline" style="margin-bottom:6px">
         <span>Модель: <b id="map-model"></b></span>
         <label class="inline">порог a/h <input id="zone-thr" type="number" step="0.05" min="0" value="0.1" style="width:70px"></label>
-        <span class="hint">фиолетовый пунктир — зона, где max|η|/h больше порога; щёлкните по карте, чтобы выбрать точку</span>
+        <span class="hint">цвет — отклонение уровня воды от обычного (красный — выше, синий — ниже); фиолетовый пунктир — где наибольший подъём за расчёт больше порога·глубина; щелчок по карте — график уровня в точке. Ячейка данных — 1,3 × 2,7 км.</span>
       </div>
       <div class="two">
         <div class="plot-wrap">
@@ -228,28 +233,62 @@ const FIELDS = {
 };
 
 // ---------------------------------------------------------------------------
-// Пресеты. Числа взяты из таблицы раздела 5 теории (те же четыре сценария);
-// когда появится analysis/gulf.md, сверить с ним. extra: имя доп. параметра -> значение,
-// подставляется в поля моделей с таким же именем.
+// Сценарий показа: шаги рассказа от линейной волны до нагона на карте залива.
+// Каждый шаг сам подставляет параметры, отмечает модели и запускает расчёт;
+// в note — что смотреть и на какой секунде. extra: имя доп. параметра -> значение,
+// zone: порог зоны a/h на 2D-карте.
 // ---------------------------------------------------------------------------
 const PRESETS = [
-  { id: "surge", name: "Нагон в Невской губе",
-    note: "a = 2 м, λ = 50 км, h = 4 м: ε = 0,5, t* ≈ 28 мин. Нелинейность решающая, нужна Сен-Венан.",
-    params: { a: 2, wavelength: 50000, depth: 4, bottom: "gulf", depth_shore: 0, L: 200000, t_end: 3600, nx: 400, n_frames: 60 },
-    extra: { wind_speed: 25, wind: 25, wind_dir: 270, wind_direction: 270 },
-    models: ["linear", "saint_venant", "shallow_2d"] },
-  { id: "test", name: "Тестовая волна",
-    note: "a = 0,5 м, λ = 5 км, h = 20 м: ε = 0,025, t* ≈ 25 мин. Проверка укручения в Сен-Венане.",
-    params: { a: 0.5, wavelength: 5000, depth: 20, bottom: "flat", L: 20000, t_end: 2400, nx: 400, n_frames: 100 },
+  { id: "1", name: "1. Линейная волна",
+    note: `Синусоида высотой 0,5 м и длиной 100 м на глубине 5 м. Линейная модель — база сравнения.
+Что смотреть: нажмите «▶ Пуск». Волна бежит вправо со скоростью √(gh) ≈ 7 м/с и не меняет форму. Так выглядит волна, если нелинейности нет.`,
+    params: { a: 0.5, wavelength: 100, depth: 5, bottom: "flat", L: 1000, t_end: 60, nx: 400, n_frames: 121 },
+    models: ["linear"] },
+  { id: "2", name: "2. Нелинейность: треугольная волна",
+    note: `Та же волна в модели Сен-Венана (зелёная). Гребень стоит на более глубокой воде и бежит быстрее подошвы.
+Что смотреть: протяните ползунок.
+• 0–10 с — передний склон становится круче заднего;
+• около 15 с (t*) — передний склон вертикальный: это обрушение в модели;
+• 20–60 с — профиль-пила, «треугольная волна»: пологий тыл и обрыв спереди (бор), фронт в 20 раз круче тыла. На обрыве теряется энергия: к 60 с пила почти вдвое ниже исходной волны.
+График разности ниже переходит 10% уже через несколько секунд: сначала копится сдвиг гребней, форма меняется позже.`,
+    params: { a: 0.5, wavelength: 100, depth: 5, bottom: "flat", L: 1000, t_end: 60, nx: 800, n_frames: 121 },
     models: ["linear", "saint_venant"] },
-  { id: "solitons", name: "Солитоны",
-    note: "a = 0,5 м, λ = 2 км, h = 20 м: Ur ≈ 250. Сен-Венан даёт бор, КдФ — цепочку солитонов (теория, 2.4: при Ur ≈ 16 солитон был бы один).",
-    params: { a: 0.5, wavelength: 2000, depth: 20, bottom: "flat", L: 16000, t_end: 21600, nx: 1024, n_frames: 120 },
+  { id: "3", name: "3. Дисперсия: солитоны вместо пилы",
+    note: `Добавлены Буссинеск и КдФ: в них короткие волны бегут медленнее длинных (дисперсия).
+Что смотреть: около 15–20 с, когда у Сен-Венана фронт становится вертикальным, у Буссинеска и КдФ обрыва нет: каждый гребень делится на два узких горба, и ведущий растёт почти до 1 м — вдвое выше исходной волны. Это солитоны: нелинейность и дисперсия уравновешены, горб бежит не меняя формы. Сравните с зелёной пилой: одна и та же волна, разница только в дисперсии.`,
+    params: { a: 0.5, wavelength: 100, depth: 5, bottom: "flat", L: 1000, t_end: 60, nx: 800, n_frames: 121 },
     models: ["linear", "saint_venant", "kdv", "boussinesq"] },
-  { id: "wind", name: "Ветровая волна у берега",
-    note: "a = 1 м, λ = 38 м, h = 3 м: ε = 0,33, Ur ≈ 54, kh ≈ 0,5 (уже не мелкая вода). Буссинеск + критерий обрушения.",
-    params: { a: 1, wavelength: 38, depth: 3, bottom: "slope", depth_shore: 0, L: 400, t_end: 30, nx: 800, n_frames: 120 },
+  { id: "4", name: "4. Волна набегает на берег",
+    note: `Дно поднимается от 5 м слева до сухого берега справа (глубина у края −1 м). Слева стартует пакет из трёх волн высотой 0,3 м.
+Что смотреть: пакет идёт к берегу, укорачивается и растёт — это закон Грина. У берега:
+• Сен-Венан — фронт опрокидывается в ступеньку, вода взбегает на сухой берег и откатывается;
+• Буссинеск — гребень растёт, пока высота не дойдёт до 0,78 глубины, дальше его гасит критерий обрушения;
+• линейная — волна отражается от берега как от стенки и не теряет энергию.
+КдФ здесь не считается: её уравнение выведено для ровного дна.`,
+    params: { a: 0.3, wavelength: 100, depth: 5, bottom: "slope", depth_shore: -1, L: 1000, t_end: 150, nx: 1000, n_frames: 151 },
     models: ["linear", "saint_venant", "boussinesq"] },
+  { id: "5", name: "5. Разрез залива: волна идёт к Петербургу",
+    note: `Реальный профиль дна (GEBCO): слева вход в разрез, глубина 30 м, справа берег Петербурга. Волна 0,5 м длиной 10 км, 5 часов.
+Что смотреть:
+• первый час — в открытом заливе фронт Сен-Венана укручается в ступеньку, хотя волна в 60 раз ниже глубины: нелинейность копится по пути;
+• у Буссинеска на том же месте фронт рассыпается на гребни, выше исходной волны;
+• около 2–3 ч — волна проходит Кронштадт и выходит на мелководье Невской губы (3–5 м);
+• у берега линейная волна в несколько раз выше нелинейных: она не знает ни бора, ни обрушения.
+Счёт около 10 с.`,
+    params: { a: 0.5, wavelength: 10000, depth: 30, bottom: "gulf", depth_shore: 0, L: 181000, t_end: 18000, nx: 1500, n_frames: 181 },
+    models: ["linear", "saint_venant", "boussinesq"] },
+  { id: "6", name: "6. Карта: длинная волна входит в Невскую губу",
+    note: `Двумерная модель на карте глубин восточной части залива. С запада приходит длинная волна (300 км) высотой 0,3 м, 12 часов, без ветра.
+Что смотреть: красный — вода выше обычного, синий — ниже. Волна сужающимся и мелеющим заливом поднимается у Петербурга почти втрое. Фиолетовый пунктир — где высота волны больше 0,3 глубины: это почти целиком Невская губа. Щелчок по карте — график уровня в точке.`,
+    params: { a: 0.3, wavelength: 300000, depth: 30, bottom: "gulf", L: 181000, t_end: 43200, nx: 400, n_frames: 60 },
+    extra: { wind_speed: 0, wind_dir: 270 }, zone: 0.3,
+    models: ["shallow_2d"] },
+  { id: "7", name: "7. Карта: нагон от западного ветра",
+    note: `То же плюс западный ветер 25 м/с. Это не цунами и не бегущая волна, а нагон: ветер часами гонит воду на восток, и она скапливается в Невской губе. Так возникают петербургские наводнения.
+Что смотреть: уровень у Петербурга поднимается примерно на 3 м (наводнения 1955 — 2,9 м, 1924 — 3,8 м; дамбы в модели нет). Пунктир при пороге 0,3 — где подъём воды сравним с глубиной.`,
+    params: { a: 0.5, wavelength: 300000, depth: 30, bottom: "gulf", L: 181000, t_end: 43200, nx: 400, n_frames: 60 },
+    extra: { wind_speed: 25, wind_dir: 270 }, zone: 0.3,
+    models: ["shallow_2d"] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -673,7 +712,12 @@ function setFrame(i) {
   state.frame = i;
   const t = state.tGrid[i] ?? 0;
   $("time").value = i;
-  $("time-label").textContent = "t = " + fmtTime(t);
+  let label = "t = " + fmtTime(t);
+  if (state.params && state.params.bottom === "flat" && state.ids1d.length) {
+    const ts = estimates(state.params).tStar;
+    if (isFinite(ts) && ts <= state.tGrid[state.tGrid.length - 1]) label += (t < ts ? "  · до t* " : "  · после t* ") + fmtTime(Math.abs(ts - t));
+  }
+  $("time-label").textContent = label;
   const ids = state.ids1d;
   if (ids.length && $("wave").data) {
     const ys = ids.map(id => { const r = state.results[id]; return r.eta[nearestIndex(r.t, t)]; });
@@ -803,7 +847,7 @@ function draw2d() {
     state.point = { id, ...(spb ? nearestWet(r, spb.x, spb.y) : { ix: nx >> 1, iy: ny >> 1 }) };
   }
   const traces = [
-    { type: "heatmap", x: xs, y: ys, z: maskedEta(r, 0), zmin: -amp, zmax: amp, colorscale: "RdBu", reversescale: false,   // подъём — красный, опускание — синий
+    { type: "heatmap", x: xs, y: ys, z: maskedEta(r, 0), zmin: -amp, zmax: amp, colorscale: "RdBu", reversescale: false, zsmooth: "best",   // подъём — красный, опускание — синий
       colorbar: { title: { text: "η, м", side: "right" }, len: 0.9 },
       hovertemplate: "x = %{x:.1f} км<br>y = %{y:.1f} км<br>η = %{z:.3f} м<extra></extra>" },
     { type: "heatmap", x: xs, y: ys, z: r.h.map(row => row.map(h => (h > 0 ? null : 1))), colorscale: [[0, "#d9cfb8"], [1, "#d9cfb8"]], showscale: false, hoverinfo: "skip" },
@@ -981,20 +1025,24 @@ function renderLadder() {
 // ---------------------------------------------------------------------------
 function initPresets() {
   for (const p of PRESETS) $("preset").append(el("option", { value: p.id, text: p.name }));
-  $("preset").addEventListener("change", () => {
-    const p = PRESETS.find(x => x.id === $("preset").value);
-    $("preset-note").textContent = p ? p.note : "";
-    if (!p) return;
-    for (const [k, v] of Object.entries(p.params)) if ($(k)) $(k).value = v;
-    const avail = (p.models || []).filter(id => modelById(id));
-    if (avail.length) document.querySelectorAll("#models input").forEach(cb => cb.checked = avail.includes(cb.value));
-    renderExtra();
-    if (p.extra) for (const m of models) for (const ep of m.extra) {
-      const input = $(`extra__${m.id}__${ep.name}`);
-      if (input && p.extra[ep.name] !== undefined) input.value = p.extra[ep.name];
-    }
-    syncBottom(); updateNumbers();
-  });
+  $("preset").addEventListener("change", () => applyPreset($("preset").value, true));
+}
+function applyPreset(id, autoRun) {
+  const p = PRESETS.find(x => x.id === id);
+  $("preset").value = p ? p.id : "";
+  $("preset-note").textContent = p ? p.note : "";
+  if (!p) return;
+  for (const [k, v] of Object.entries(p.params)) if ($(k)) $(k).value = v;
+  const avail = (p.models || []).filter(id => modelById(id));
+  if (avail.length) document.querySelectorAll("#models input").forEach(cb => cb.checked = avail.includes(cb.value));
+  renderExtra();
+  if (p.extra) for (const m of models) for (const ep of m.extra) {
+    const input = $(`extra__${m.id}__${ep.name}`);
+    if (input && p.extra[ep.name] !== undefined) input.value = p.extra[ep.name];
+  }
+  if (p.zone !== undefined) $("zone-thr").value = p.zone;
+  syncBottom(); updateNumbers(); renderLadder();
+  if (autoRun) run();
 }
 function syncBottom() { $("depth_shore").disabled = $("bottom").value !== "slope"; }
 
@@ -1024,6 +1072,7 @@ document.querySelector("aside").addEventListener("keydown", e => { if (e.key ===
   syncBottom();
   updateNumbers();
   await loadModels();
+  applyPreset("1", true);      // начинаем с первого шага рассказа
 })();
 </script>
 </body>
