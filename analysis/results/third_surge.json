@@ -1,0 +1,223 @@
+{
+  "records": [
+    {
+      "id": "rest",
+      "input_amplitude_m": 0.0,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 0.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 0.0,
+      "sampled_peak_at_gauge_m": 0.0,
+      "sampled_peak_time_s": 0.0,
+      "zone_over_0_1_km2": 0.0,
+      "zone_over_0_3_km2": 0.0,
+      "elapsed_s": 5.624807999993209
+    },
+    {
+      "id": "wave_only",
+      "input_amplitude_m": 0.5,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 0.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 1.2711895644068179,
+      "sampled_peak_at_gauge_m": 1.2711691743119875,
+      "sampled_peak_time_s": 25260.0,
+      "zone_over_0_1_km2": 1584.021077859395,
+      "zone_over_0_3_km2": 363.21502422253644,
+      "elapsed_s": 5.945822400011821
+    },
+    {
+      "id": "wind_only",
+      "input_amplitude_m": 0.0,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 25.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 2.302707214032429,
+      "sampled_peak_at_gauge_m": 2.302702605327556,
+      "sampled_peak_time_s": 19080.0,
+      "zone_over_0_1_km2": 1035.8354394494556,
+      "zone_over_0_3_km2": 450.6556782020359,
+      "elapsed_s": 5.5372992000193335
+    },
+    {
+      "id": "combined_20",
+      "input_amplitude_m": 0.5,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 20.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 2.5963313294527435,
+      "sampled_peak_at_gauge_m": 2.5962986089525755,
+      "sampled_peak_time_s": 24060.0,
+      "zone_over_0_1_km2": 1977.5040207671427,
+      "zone_over_0_3_km2": 669.2573131507847,
+      "elapsed_s": 5.663187400001334
+    },
+    {
+      "id": "combined_25",
+      "input_amplitude_m": 0.5,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 25.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 3.2021953859708496,
+      "sampled_peak_at_gauge_m": 3.202188336691286,
+      "sampled_peak_time_s": 23640.0,
+      "zone_over_0_1_km2": 2175.927043259084,
+      "zone_over_0_3_km2": 766.787273358688,
+      "elapsed_s": 5.598673400003463,
+      "frame_refinement_peak_change_m": 1.3042778376437525e-05
+    },
+    {
+      "id": "combined_30",
+      "input_amplitude_m": 0.5,
+      "wavelength_m": 300000.0,
+      "extra": {
+        "wind_speed": 30.0,
+        "wind_dir": 270.0,
+        "friction": 0.0025,
+        "coriolis": 1.0,
+        "dp": 0.0
+      },
+      "peak_at_gauge_m": 3.8815815886614295,
+      "sampled_peak_at_gauge_m": 3.881573219460373,
+      "sampled_peak_time_s": 23220.0,
+      "zone_over_0_1_km2": 2404.6179844362364,
+      "zone_over_0_3_km2": 897.9482543279372,
+      "elapsed_s": 5.6414525999862235
+    }
+  ],
+  "observations": [
+    {
+      "event": "10 (21) сентября 1777",
+      "reported_level_m": 3.21,
+      "datum_as_published": "подъём 3,21 м; ноль отсчёта в описании события не уточнён",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/articles/o-navodneniyah-v-sankt-peterburge"
+      ]
+    },
+    {
+      "event": "7 (19) ноября 1824",
+      "reported_level_m": 4.21,
+      "datum_as_published": "подъём 4,21 м",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/articles/o-navodneniyah-v-sankt-peterburge"
+      ]
+    },
+    {
+      "event": "23 сентября 1924",
+      "reported_level_m": 3.8,
+      "datum_as_published": "3,80 м выше ординара по футштоку Петрокрепости, к 19:00",
+      "wind_as_published": "западный ветер до 34 м/с — по отдельному музейному источнику",
+      "sources": [
+        "https://78.mchs.gov.ru/deyatelnost/press-centr/novosti/3816610",
+        "https://gmgs.ru/post/18463"
+      ]
+    },
+    {
+      "event": "15 октября 1929",
+      "reported_level_m": 2.58,
+      "datum_as_published": "+2,58 м БС",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/news/o-navodneniyah-v-oktyabre"
+      ]
+    },
+    {
+      "event": "15 октября 1955",
+      "reported_level_m": 2.93,
+      "datum_as_published": "+2,93 м выше ординара, пост «Горный институт»",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/news/stranicy-istorii-navodnenie-v-leningrade-15-oktyabrya-1955-goda"
+      ]
+    },
+    {
+      "event": "18 октября 1967",
+      "reported_level_m": 2.44,
+      "datum_as_published": "+2,44 м БС",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/news/o-navodneniyah-v-oktyabre"
+      ]
+    },
+    {
+      "event": "29–30 сентября 1975",
+      "reported_level_m": 2.81,
+      "datum_as_published": "+2,81 м БС, пост «Горный институт»; пик 30 сентября в 04:00",
+      "wind_as_published": "западные ветры 25–30 м/с",
+      "sources": [
+        "https://dambaspb.ru/news/pamyatnye-daty-kzs-6"
+      ]
+    },
+    {
+      "event": "18–19 октября 1998",
+      "reported_level_m": 2.2,
+      "datum_as_published": "+2,20 м БС",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/news/o-navodneniyah-v-oktyabre"
+      ]
+    },
+    {
+      "event": "30 ноября 1999",
+      "reported_level_m": 2.62,
+      "datum_as_published": "2,62 м выше ординара",
+      "wind_as_published": "шквальный ветер до 32 м/с",
+      "sources": [
+        "https://dambaspb.ru/news/25-let-so-dnya-poslednego-navodneniya-xx-veka-v-sankt-peterburge"
+      ]
+    },
+    {
+      "event": "9 января 2005",
+      "reported_level_m": 2.39,
+      "datum_as_published": "2,39 м; ноль для этого события в статье не уточнён",
+      "wind_as_published": "не найдено",
+      "sources": [
+        "https://dambaspb.ru/news/125-let-so-dnya-pervogo-sostavlennogo-prognoza-o-navodnenii-v-peterburge"
+      ]
+    }
+  ],
+  "gauge_index_yx": [
+    21,
+    142
+  ],
+  "gauge_lonlat": [
+    30.229999999999997,
+    59.916
+  ],
+  "target_lonlat": [
+    30.26,
+    59.93
+  ],
+  "distance_to_target_m": 2281.5306481673383,
+  "gauge_depth_m": 4.409503359926669,
+  "comparison": "scale comparison only; historical datums not transformed; no fitted storm forcing",
+  "peak_method": "eta_max over internal solver steps; gauge curves sampled each 60 s",
+  "zone_method": "local positive eta_max/h indicator, not a linear-vs-nonlinear difference"
+}

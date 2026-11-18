@@ -1,0 +1,16 @@
+{
+  "analysis/third_wave.py": "d849badce8370480d3f2a0875f44cea903a535f7e6b2cec048602768a407849b",
+  "analysis/compare.py": "2565a62f6cf6627db54646032e251e248318f864c589e3e5eed959fd517c3f21",
+  "backend/contract.py": "b07e9ac57700f0c3d529d94f4114c5073fc743959222c2f92330095ff294f0f9",
+  "backend/registry.py": "c8b0463e01cba9aa44a614b248bb3ec8cb4bfa6b99dce4d388b7970c7483d893",
+  "backend/common.py": "4d9ab669539817ecb0ec4a54dcd38a49a247eadd37fddb3aeb6dacfd8ebd2bd9",
+  "backend/models/linear.py": "9c755d756b287022ba2c7c1e2098334251bebda39d03589b3a3bcb03ef766ea9",
+  "backend/models/saint_venant.py": "99ef5051301066bc6c8e6271d9928e1653641edcc4b9af8dbf1a124985f1328f",
+  "backend/models/kdv.py": "b57eb4b8ae13abed24596299ac4a745016339064ad5d2109ff09663f4d98b31b",
+  "backend/models/boussinesq.py": "b7b722c87216a27e414e5611fc41a9edb4fb1c95f58dd1626c2da58a2b64a532",
+  "backend/models/shallow_2d.py": "74008a785e6973861508e168d82d298574644e107bd6fe711d6dd7f4cf7b739e",
+  "data/gulf_profile.npz": "2fb01ce89c52162534e3d4cc48ae7904a255390a9bdcb05ef23ba5dd15521fdd",
+  "data/gulf_bathymetry.npz": "b46d356f1371ffaaad5b310affaa7e89853401e63718a49e9c565890988e9783",
+  "analysis/gulf.md": "26eaef89db3e7554610febc200ebefd723b8cc6c8049ba850fa31f2e969f5618",
+  "analysis/results/compare_summary.json": "2779236f8f1c5c4bfb1dacc5e15eee968616cbaf02746234a3d2135febf5ec57"
+}
