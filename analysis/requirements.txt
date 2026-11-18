@@ -1,4 +1,4 @@
-# Offline preparation of bathymetry and figures (Python 3.11).
+# Bathymetry preparation, model comparisons and figures (Python 3.11).
 numpy
 scipy
 matplotlib

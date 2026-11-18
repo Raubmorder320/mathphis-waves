@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "reference": "linear",
+  "model": "saint_venant",
+  "threshold": 0.1,
+  "flat_loglog_slope": -1.0069563811779618,
+  "flat": {
+    "params": {
+      "a": 0.5,
+      "wavelength": 100,
+      "depth": 5,
+      "bottom": "flat",
+      "depth_shore": 1.0,
+      "L": 1000,
+      "t_end": 160,
+      "nx": 3200,
+      "n_frames": 1601,
+      "extra": {}
+    },
+    "records": [
+      {
+        "amplitude_m": 0.05,
+        "t10_s": 28.400000000000002,
+        "t10_previous_frame_s": 28.3,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.00017597021939315394,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 7.428
+      },
+      {
+        "amplitude_m": 0.07296164014805424,
+        "t10_s": 19.5,
+        "t10_previous_frame_s": 19.400000000000002,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.00037557341868853233,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 14.627
+      },
+      {
+        "amplitude_m": 0.10646801866188323,
+        "t10_s": 13.3,
+        "t10_previous_frame_s": 13.200000000000001,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0008024519968948818,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 16.103
+      },
+      {
+        "amplitude_m": 0.15536162529769293,
+        "t10_s": 9.1,
+        "t10_previous_frame_s": 9.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0017172530358592064,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.376
+      },
+      {
+        "amplitude_m": 0.22670877995574226,
+        "t10_s": 6.300000000000001,
+        "t10_previous_frame_s": 6.2,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0036836111570283103,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.378
+      },
+      {
+        "amplitude_m": 0.3308208884307056,
+        "t10_s": 4.3,
+        "t10_previous_frame_s": 4.2,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.007929446978896526,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.395
+      },
+      {
+        "amplitude_m": 0.48274469230281486,
+        "t10_s": 2.9000000000000004,
+        "t10_previous_frame_s": 2.8000000000000003,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.01716020266944074,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.621
+      },
+      {
+        "amplitude_m": 0.704436890463623,
+        "t10_s": 2.0,
+        "t10_previous_frame_s": 1.9000000000000001,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.03744146743161081,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.75
+      },
+      {
+        "amplitude_m": 1.0279374181804235,
+        "t10_s": 1.4000000000000001,
+        "t10_previous_frame_s": 1.3,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.08275472886330304,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.787
+      },
+      {
+        "amplitude_m": 1.5,
+        "t10_s": 0.9,
+        "t10_previous_frame_s": 0.8,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.18685488975256082,
+        "status": "crossed",
+        "onset_x_m": null,
+        "onset_depth_m": null,
+        "distance_to_shore_m": null,
+        "elapsed_s": 4.999
+      }
+    ],
+    "refinement": [
+      {
+        "amplitude_m": 0.05,
+        "fine_nx": 6400,
+        "fine_frame_interval_s": 0.05,
+        "fine_t10_s": 28.35,
+        "relative_t10_change": 0.0017605633802817433,
+        "onset_x_change_m": null
+      },
+      {
+        "amplitude_m": 1.5,
+        "fine_nx": 6400,
+        "fine_frame_interval_s": 0.05,
+        "fine_t10_s": 0.9,
+        "relative_t10_change": 0.0,
+        "onset_x_change_m": null
+      }
+    ],
+    "small_amplitude_control_a_m": 0.0001,
+    "small_amplitude_control_max_d": 0.007477966188054648,
+    "actual_domain_length_m": 1000.0,
+    "initial_surface_peak_over_a": 1.0,
+    "max_kh": 0.3141592653589793
+  },
+  "gulf": {
+    "params": {
+      "a": 0.5,
+      "wavelength": 10000,
+      "depth": 5.0,
+      "bottom": "gulf",
+      "depth_shore": 1.0,
+      "L": 1000.0,
+      "t_end": 7000,
+      "nx": 3201,
+      "n_frames": 701,
+      "extra": {}
+    },
+    "records": [
+      {
+        "amplitude_m": 0.2,
+        "t10_s": 1500.0,
+        "t10_previous_frame_s": 1490.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 7.02989090458489e-05,
+        "status": "crossed",
+        "onset_x_m": 47509.569970881515,
+        "onset_depth_m": 24.841177571181305,
+        "distance_to_shore_m": 133911.2222806947,
+        "elapsed_s": 3.461
+      },
+      {
+        "amplitude_m": 0.4,
+        "t10_s": 1030.0,
+        "t10_previous_frame_s": 1020.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.00028169018910137456,
+        "status": "crossed",
+        "onset_x_m": 39175.552326824734,
+        "onset_depth_m": 36.01153860340497,
+        "distance_to_shore_m": 142245.23992475145,
+        "elapsed_s": 3.446
+      },
+      {
+        "amplitude_m": 0.6000000000000001,
+        "t10_s": 810.0,
+        "t10_previous_frame_s": 800.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0006349205785177447,
+        "status": "crossed",
+        "onset_x_m": 34753.42051569257,
+        "onset_depth_m": 47.051971437766014,
+        "distance_to_shore_m": 146667.37173588364,
+        "elapsed_s": 3.451
+      },
+      {
+        "amplitude_m": 0.8,
+        "t10_s": 620.0,
+        "t10_previous_frame_s": 610.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.001130743425917513,
+        "status": "crossed",
+        "onset_x_m": 28460.386784466016,
+        "onset_depth_m": 54.302538906585255,
+        "distance_to_shore_m": 152960.4054671102,
+        "elapsed_s": 3.461
+      },
+      {
+        "amplitude_m": 1.0,
+        "t10_s": 500.0,
+        "t10_previous_frame_s": 490.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0017699187723975163,
+        "status": "crossed",
+        "onset_x_m": 25682.380903113757,
+        "onset_depth_m": 56.411864510098816,
+        "distance_to_shore_m": 155738.41134846245,
+        "elapsed_s": 3.513
+      },
+      {
+        "amplitude_m": 1.2,
+        "t10_s": 420.0,
+        "t10_previous_frame_s": 410.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.002553213435017243,
+        "status": "crossed",
+        "onset_x_m": 23811.478983019377,
+        "onset_depth_m": 57.67199302503174,
+        "distance_to_shore_m": 157609.31326855684,
+        "elapsed_s": 3.483
+      },
+      {
+        "amplitude_m": 1.4000000000000001,
+        "t10_s": 360.0,
+        "t10_previous_frame_s": 350.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.0034814010917303406,
+        "status": "crossed",
+        "onset_x_m": 22394.129043553938,
+        "onset_depth_m": 56.572770960831825,
+        "distance_to_shore_m": 159026.66320802228,
+        "elapsed_s": 3.494
+      },
+      {
+        "amplitude_m": 1.6,
+        "t10_s": 310.0,
+        "t10_previous_frame_s": 300.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.004555262367602064,
+        "status": "crossed",
+        "onset_x_m": 21203.555094402967,
+        "onset_depth_m": 55.26839222004256,
+        "distance_to_shore_m": 160217.23715717322,
+        "elapsed_s": 3.525
+      },
+      {
+        "amplitude_m": 1.8,
+        "t10_s": 280.0,
+        "t10_previous_frame_s": 270.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.00577558492246133,
+        "status": "crossed",
+        "onset_x_m": 20523.227123459557,
+        "onset_depth_m": 54.55675238845486,
+        "distance_to_shore_m": 160897.56512811664,
+        "elapsed_s": 3.525
+      },
+      {
+        "amplitude_m": 2.0,
+        "t10_s": 250.0,
+        "t10_previous_frame_s": 240.0,
+        "coastal_response_s": null,
+        "initial_velocity_difference_m_s": 0.007143163539981456,
+        "status": "crossed",
+        "onset_x_m": 19842.899152516147,
+        "onset_depth_m": 53.86184417858232,
+        "distance_to_shore_m": 161577.89309906005,
+        "elapsed_s": 3.51
+      }
+    ],
+    "refinement": [
+      {
+        "amplitude_m": 0.2,
+        "fine_nx": 6401,
+        "fine_frame_interval_s": 5.0,
+        "fine_t10_s": 1500.0,
+        "relative_t10_change": 0.0,
+        "onset_x_change_m": 0.0
+      },
+      {
+        "amplitude_m": 2.0,
+        "fine_nx": 6401,
+        "fine_frame_interval_s": 5.0,
+        "fine_t10_s": 245.0,
+        "relative_t10_change": 0.020000000000000018,
+        "onset_x_change_m": 141.73499394654573
+      }
+    ],
+    "small_amplitude_control_a_m": 0.0001,
+    "small_amplitude_control_max_d": 0.01953270498607657,
+    "actual_domain_length_m": 181420.7922515762,
+    "initial_surface_peak_over_a": 0.9365127400795019,
+    "max_kh": 0.0364689941527805
+  },
+  "warnings": [
+    "flat: kh exceeds 0.3; marginal shallow-water benchmark"
+  ],
+  "gulf_profile_sha256": "2fb01ce89c52162534e3d4cc48ae7904a255390a9bdcb05ef23ba5dd15521fdd",
+  "onset_definition": "first saved global d>0.1; location is argmax at that frame",
+  "gulf_coastal_censor": "onset must precede |eta|/a>1e-3 at last initially wet node",
+  "initial_velocities": "model-native u_linear and u_simple_wave from common.py"
+}
