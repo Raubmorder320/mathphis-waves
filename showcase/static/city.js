@@ -175,7 +175,8 @@ const FLOODW_VS = `
     vec4 t = texture2D(terrain, cuv);
     bool wall = t.r > 500.0;                                   // здание: вода у стены обрывается
     float bed = wall ? t.g : t.r;
-    vD = wall ? 0.0 : s.r; vUV = cuv; vSpeed = length(s.gb);
+    // Только суша: море и реки зоны рисует общая вода залива (без резкой границы зоны).
+    vD = (wall || t.a > 0.5) ? 0.0 : s.r; vUV = cuv; vSpeed = length(s.gb);
     vec3 p = position;
     p.z = vD > 0.01 ? bed + vD : bed - 0.3;
     vP = p;

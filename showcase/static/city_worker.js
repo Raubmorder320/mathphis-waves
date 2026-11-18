@@ -1,7 +1,7 @@
 // Сборка геометрии детального города в отдельном потоке: главный поток только
 // создаёт BufferGeometry из готовых массивов (без генерации при движении камеры).
 // Кварталы 500 × 500 м: у каждого свой буфер зданий и улиц — работает отсечение вне экрана.
-import { ShapeUtils, Vector2, Color } from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { ShapeUtils, Vector2, Color } from "/static/vendor/three.module.js";
 
 const CHUNK = 500;           // м
 const CURB = 0.18;           // м — бордюр

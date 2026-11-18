@@ -9,12 +9,16 @@
 """
 import asyncio
 import math
+import os
 import sys
 from pathlib import Path
 
 import httpx
 
-CACHE = Path(__file__).resolve().parent / ".tiles"
+# Кэш: встроенный (в приложении — только чтение) и пишущий (SHOWCASE_CACHE, в приложении —
+# папка пользователя). Без приложения это одна и та же папка showcase/.tiles.
+BUNDLED = Path(__file__).resolve().parent / ".tiles"
+CACHE = Path(os.environ.get("SHOWCASE_CACHE") or BUNDLED)
 SOURCES = {
     # Спутниковый снимок и подписи — Esri; рельеф (с глубинами моря) — Mapzen/AWS Terrain Tiles.
     "sat": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "jpg"),
@@ -45,8 +49,10 @@ async def get_tile(src, z, x, y, timeout=45.0):
     """Байты тайла и тип, или None, если поставщик недоступен."""
     global _client
     p = path_for(src, z, x, y)
-    if p.exists():
-        return p.read_bytes(), MEDIA[SOURCES[src][1]]
+    b = BUNDLED / src / str(z) / str(x) / f"{y}.{SOURCES[src][1]}"
+    for q in (p, b):
+        if q.exists():
+            return q.read_bytes(), MEDIA[SOURCES[src][1]]
     lock = _locks.setdefault((str(p), id(asyncio.get_running_loop())), asyncio.Lock())
     async with lock:
         if p.exists():

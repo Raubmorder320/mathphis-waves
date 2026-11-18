@@ -18,6 +18,16 @@ const CITY_AREAS = [
   { id: "kronstadt", name: "Кронштадт", bbox: [59.982, 29.700, 60.012, 29.800] },
 ];
 const CITY_ZOOM = 13.2;
+const TERRAIN_ZOOM = 11;                              // ближе — без 3D-рельефа (и без readPixels)
+let terrainOn = true;
+function syncTerrain() {
+  const z = map.getZoom();
+  const near = cityState.area || coastState.on || dive?.active;
+  const want = !near && (terrainOn ? z < TERRAIN_ZOOM + 0.3 : z < TERRAIN_ZOOM - 0.3);   // с запасом, без дрожания
+  if (want === terrainOn) return;
+  terrainOn = want;
+  map.setTerrain(want ? { source: "dem", exaggeration: TERRAIN_EXAG } : null);
+}
 const COAST = { id: "coast", bbox: [59.84, 29.45, 60.10, 30.35], zoom: 12.3 };   // кольцо берега Невской губы
 const coastState = { area: null, loading: false, failed: false };
 let city, dive;
@@ -147,7 +157,7 @@ const WATER_FS = `
     float shoreDist = (st.g * 255.0 - 128.0) * 40.0;
     if (shoreDist < 0.0) discard;
     // Внутри зоны детального города воду рисует GPU-затопление (city.js).
-    if (vP.x > cityBox.x && vP.x < cityBox.z && vP.y > cityBox.y && vP.y < cityBox.w) discard;
+    // (раньше вода внутри зоны города вырезалась — теперь море рисуется везде одинаково)
     float depth = pow(max(code - 1.0, 0.0) / 25.0, 2.0);
 
     vec2 p = vP.xy;
@@ -325,7 +335,9 @@ function updateWater(dt = 0) {
   const s = state.scenario.eta_scale, E = state.eta;
   const o0 = f * n, o1 = (f + 1) * n;
   const { pos, nrm, col, glow, idx, wts, depth, taper, inModel } = water;
-  const ex = state.exag;
+  const ex = terrainOn ? state.exag : 1;               // без рельефа земля плоская — вода в натуральную величину
+  // В городе высоты настоящие: вода на уровне моря; на крупном масштабе — чуть выше рельефа карты.
+  const lift = cityState.area || coastState.on ? 0 : SURFACE_LIFT;
   for (let q = 0; q < inModel.length; q++) {
     const v = inModel[q];
     let e = 0;
@@ -334,7 +346,7 @@ function updateWater(dt = 0) {
       if (wt) e += wt * ((1 - w) * E[o0 + c] + w * E[o1 + c]);
     }
     e *= s * taper[v];
-    pos[3 * v + 2] = SURFACE_LIFT + e * ex;
+    pos[3 * v + 2] = lift + e * ex;
     const r = depth[v] > 0 ? Math.max(e, 0) / depth[v] : 0;
     let c = [0, 0, 0];
     if (state.mode === "eta") c = ramp(ETA_RAMP, e / state.etaPeak);
@@ -751,7 +763,12 @@ function fly(dt) {
   let dx = 0, dy = 0;
   if (keys.has("w")) dy -= v; if (keys.has("s")) dy += v;
   if (keys.has("a")) dx -= v; if (keys.has("d")) dx += v;
-  if (dx || dy) map.panBy([dx, dy], { duration: 0 });
+  if (dx || dy) {
+    const c = map.getCenter(), b = map.getBearing() * Math.PI / 180;
+    const mpp = 40075016.686 * Math.cos(c.lat * Math.PI / 180) / (512 * 2 ** map.getZoom());
+    const e = (dx * Math.cos(b) - dy * Math.sin(b)) * mpp, n = -(dx * Math.sin(b) + dy * Math.cos(b)) * mpp;
+    map.jumpTo({ center: [c.lng + e / (111320 * Math.cos(c.lat * Math.PI / 180)), c.lat + n / 110540] });
+  }
   if (keys.has("q")) map.setBearing(map.getBearing() - 50 * dt * fast);
   if (keys.has("e")) map.setBearing(map.getBearing() + 50 * dt * fast);
   if (keys.has("r")) map.setPitch(Math.min(map.getPitch() + 30 * dt, 85));
@@ -768,6 +785,7 @@ addEventListener("keydown", e => {
   else if (k === " ") { e.preventDefault(); togglePlay(); }
   else if (k === "h") $("hud").classList.toggle("hidden");
   else if (k === "g") toggleDive();
+  else if (k === "f5") { e.preventDefault(); location.replace(location.pathname + location.search); }
   else if (k === "escape") closeSection();
   else keys.add(k);
 });
@@ -864,15 +882,21 @@ const waterLayer = {
       if (cityState.area) city.render(cityState.area, dive.mercatorMatrix().elements);
       return;
     }
-    this.renderer.render(this.scene, this.camera);
+    // Сначала непрозрачный город, потом прозрачная вода: море видно над дном, но не над сушей.
     if (coastState.area && coastState.on) city.render(coastState.area, matrix);
     if (cityState.area) city.render(cityState.area, matrix);
+    this.renderer.render(this.scene, this.camera);
   },
 };
 
 // Диагностика: на чём рисует браузер. Программный рендер (SwiftShader) — главная причина
 // «зависаний» города: тогда всё считается процессором.
 const SAFE = new URLSearchParams(location.search).has("safe");
+const PR_FAR = Math.min(devicePixelRatio, 1.5), PR_CITY = 1;
+function setDetailPixelRatio(city) {                  // меняем только на входе/выходе, не во время полёта
+  const want = SAFE ? 1 : city ? PR_CITY : PR_FAR;
+  if (Math.abs(map.getPixelRatio() - want) > 0.01) map.setPixelRatio(want);
+}
 function gpuInfo() {
   const gl = map.getCanvas().getContext("webgl2") || map.getCanvas().getContext("webgl");
   const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
@@ -886,10 +910,21 @@ map.once("load", () => {
     toast(`Chrome рисует БЕЗ видеокарты (${r}). Включите: Настройки → Система → «Использовать графическое ускорение», ` +
       `и перезапустите Chrome. Иначе город будет зависать.`, true, 20000);
   }
-  if (SAFE) { map.setPixelRatio(1); toast("Безопасный режим: без затопления и комнат за окнами, разрешение 1", false, 4000); }
+  setDetailPixelRatio(false);
+  if (SAFE) toast("Безопасный режим: без затопления и комнат за окнами, разрешение 1", false, 4000);
 });
 
+// Любая ошибка — в консоль со стеком и на экран, а не молчаливая «заморозка».
+addEventListener("error", e => { console.error("Ошибка:", e.error?.stack || e.message); });
+addEventListener("unhandledrejection", e => { console.error("Ошибка (promise):", e.reason?.stack || e.reason); });
+
 map.on("load", async () => {
+  try { await startScene(); } catch (e) {
+    console.error("Сцена не запустилась:", e.stack || e);
+    toast(`Сцена не запустилась: ${e.message || e}`, true, 20000);
+  }
+});
+async function startScene() {
   const m = await loadManifest();
   await loadSea();
   origin = maplibregl.MercatorCoordinate.fromLngLat([m.lon[0], m.lat[0]], 0);
@@ -922,7 +957,7 @@ map.on("load", async () => {
   map.addLayer(waterLayer, firstSymbol);
   setTimeout(() => goFocus(0), 400);
   requestAnimationFrame(loop);
-});
+}
 
 map.on("click", e => {
   if (dive?.active) return;
@@ -954,10 +989,11 @@ async function enterCity(desc) {
   cityState.loading = false;
   if (cityState.area) return;
   cityState.area = area;
+  setDetailPixelRatio(true);
   cityState.saved = coastState.on && coastState.saved ? coastState.saved : { exag: state.exag, terrain: map.getTerrain() };
   state.exag = 1;
   $("exag").value = 1; $("exag-v").textContent = "1";
-  if (!dive?.active) map.setTerrain(null);               // в городе все высоты настоящие, в метрах
+  syncTerrain();                                         // в городе все высоты настоящие, в метрах
   const [x0, y0] = local(desc.bbox[1], desc.bbox[0]), [x1, y1] = local(desc.bbox[3], desc.bbox[2]);
   water.mesh.material.uniforms.cityBox.value.set(x0, y0, x1, y1);
   $("city").classList.add("on");
@@ -971,9 +1007,10 @@ function leaveCity() {
   const area = cityState.area;
   if (!area) return;
   cityState.area = null;
+  setDetailPixelRatio(!!coastState.on);
   state.exag = coastState.on ? 1 : cityState.saved.exag;
   $("exag").value = state.exag; $("exag-v").textContent = state.exag;
-  if (!dive?.active && !coastState.on) map.setTerrain(cityState.saved.terrain);
+  syncTerrain();
   water.mesh.material.uniforms.cityBox.value.set(1e9, 1e9, -1e9, -1e9);
   water.geo.setIndex(water.trisFull);
   $("city").classList.remove("on");
@@ -991,9 +1028,11 @@ function updateCoast() {
   const on = want && !!coastState.area;
   if (on !== !!coastState.on) {
     coastState.on = on;
+    setDetailPixelRatio(on || !!cityState.area);
     if (!cityState.area) {                               // кольцо стоит на плоской карте: рельеф выключаем
-      if (on) { coastState.saved = { exag: state.exag, terrain: map.getTerrain() }; map.setTerrain(null); state.exag = 1; }
-      else if (coastState.saved) { map.setTerrain(coastState.saved.terrain); state.exag = coastState.saved.exag; }
+      if (on) { coastState.saved = { exag: state.exag }; state.exag = 1; }
+      else if (coastState.saved) state.exag = coastState.saved.exag;
+      syncTerrain();
       $("exag").value = state.exag; $("exag-v").textContent = state.exag;
     }
   }
@@ -1001,6 +1040,7 @@ function updateCoast() {
 function updateCity(dt) {
   if (!city || !state.manifest) return;
   updateCoast();
+  syncTerrain();
   let c = map.getCenter(), z = map.getZoom();
   if (dive?.active) {                                     // в свободной камере — по её положению
     c = dive.lonLat(dive.camera.position.x, dive.camera.position.y);
@@ -1076,7 +1116,17 @@ addEventListener("wheel", e => { if (dive?.active) dive.speed = Math.min(2000, M
 // Главный цикл
 // ---------------------------------------------------------------------------
 let last = performance.now(), fpsAcc = 0, fpsN = 0, lowFps = 0, lastPaint = 0, slowFrames = 0;
+// Главный цикл никогда не обрывается: ошибка кадра — в консоль, следующий кадр всё равно будет.
+let loopErrors = 0;
 function loop(now) {
+  try { frame(now); } catch (e) {
+    if (loopErrors++ < 5) console.error("Ошибка кадра:", e.stack || e);
+  }
+  requestAnimationFrame(loop);
+}
+let renderPaused = false;
+function frame(now) {
+  if (renderPaused) return;                             // «Стоп рендер»: видеокарта свободна
   if (document.hasFocus() && now - last > 100) {
     if (++slowFrames >= 5 && city && city.uniforms.quality.value > 0.5) {
       city.uniforms.quality.value = 0;
@@ -1097,8 +1147,8 @@ function loop(now) {
     if (document.visibilityState === "visible" && document.hasFocus() && fps > 3) {
       lowFps = fps < 35 ? lowFps + 1 : 0;
       const pr = map.getPixelRatio();
-      if (lowFps >= 2 && pr > 1) { map.setPixelRatio(Math.max(1, pr - 0.5)); lowFps = -6; }
-      else if (fps < 28 && oct.value > 5) oct.value -= 2;
+      void pr;
+      if (fps < 28 && oct.value > 5) oct.value -= 2;
       else if (fps > 55 && oct.value < 11) oct.value += 1;
     }
     fpsAcc = fpsN = 0;
@@ -1124,7 +1174,6 @@ function loop(now) {
     drawSection();
   }
   if (now - lastPaint >= 15.5) { map.triggerRepaint(); lastPaint = now; }
-  requestAnimationFrame(loop);
 }
 
 // Элементы управления.
@@ -1139,6 +1188,12 @@ document.querySelectorAll("#color-mode button").forEach(b => b.addEventListener(
 }));
 document.querySelectorAll("#foci button").forEach(b => b.addEventListener("click", () => goFocus(+b.dataset.focus)));
 $("sec-close").addEventListener("click", closeSection);
+$("stop-render").addEventListener("click", () => {
+  renderPaused = !renderPaused;
+  $("stop-render").textContent = renderPaused ? "▶ Рендер" : "⏹ Стоп";
+  if (!renderPaused) last = performance.now();
+});
+$("reset-app").addEventListener("click", () => location.replace(location.pathname + location.search));
 $("dive-btn").addEventListener("click", () => toggleDive());
 $("city-manual").addEventListener("change", e => { cityState.manual = e.target.checked; });
 $("city-slider").addEventListener("input", e => { cityState.manualLevel = +e.target.value; $("city-slider-v").textContent = (+e.target.value).toFixed(2); });

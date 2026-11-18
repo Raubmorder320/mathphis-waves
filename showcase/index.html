@@ -6,11 +6,11 @@
   <title>Финский залив 3D</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="/static/vendor/maplibre-gl.js"></script>
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+    { "imports": { "three": "/static/vendor/three.module.js" } }
   </script>
 </head>
 <body>
@@ -67,6 +67,8 @@
       <input id="scrub" type="range" min="0" max="1000" value="0">
       <select id="speed"><option value="600">×600</option><option value="1800" selected>×1800</option><option value="3600">×3600</option></select>
       <span id="fps"></span>
+      <button id="stop-render" title="Остановить отрисовку и расчёт — освободить видеокарту">⏹ Стоп</button>
+      <button id="reset-app" title="Перезагрузить в исходное состояние (F5)">⟲ Сброс</button>
     </div>
 
     <aside class="panel" id="section">
