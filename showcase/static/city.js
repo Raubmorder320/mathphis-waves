@@ -218,18 +218,27 @@ const FLOODW_FS = COMMON + `
 
 // Земля зоны: спутниковый снимок (city_sat.py), чуть приглушённый, чтобы дома читались.
 const GROUND_VS = `
-  attribute vec2 suv; attribute float kind;
-  varying vec2 vUV; varying float vKind; varying vec3 vP;
-  void main() { vUV = suv; vKind = kind; vP = position; gl_Position = projectionMatrix * vec4(position, 1.0); }`;
+  attribute vec2 suv; attribute vec2 cuv; attribute float kind;
+  varying vec2 vUV; varying vec2 vC; varying float vKind; varying vec3 vP;
+  void main() { vUV = suv; vC = cuv; vKind = kind; vP = position; gl_Position = projectionMatrix * vec4(position, 1.0); }`;
 const GROUND_FS = COMMON + `
   uniform sampler2D sat; uniform float hasSat;
-  varying vec2 vUV; varying float vKind; varying vec3 vP;
+  uniform sampler2D floodTerrain; uniform vec2 floodTexel;
+  varying vec2 vUV; varying vec2 vC; varying float vKind; varying vec3 vP;
   void main() {
     vec3 n = normalize(cross(dFdx(vP), dFdy(vP)));
     if (n.z < 0.0) n = -n;
-    vec3 c = hasSat > 0.5 ? texture2D(sat, vec2(vUV.x, 1.0 - vUV.y)).rgb * 1.05
+    vec3 c = hasSat > 0.5 ? texture2D(sat, vec2(vUV.x, 1.0 - vUV.y)).rgb * 1.05     // flipY: v = 1 — север
                           : mix(vec3(0.36, 0.42, 0.28), vec3(0.47, 0.46, 0.43), vnoise(vP.xy / 45.0));
     c *= 0.75 + 0.35 * max(dot(n, sunDir), 0.0);
+    // Мягкое затенение (AO) у стен: доля ячеек-зданий вокруг на 1 и 2 ячейки.
+    float occ = 0.0;
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.785398;
+      vec2 o = vec2(cos(a), sin(a)) * floodTexel;
+      occ += step(500.0, texture2D(floodTerrain, vC + o).r) * 0.6 + step(500.0, texture2D(floodTerrain, vC + 2.0 * o).r) * 0.4;
+    }
+    c *= 1.0 - 0.45 * clamp(occ / 8.0, 0.0, 1.0);
     gl_FragColor = vec4(fogged(c, vP), 1.0);
   }`;
 
@@ -321,8 +330,12 @@ export class City {
       w.postMessage({ id });
     });
     const { osm, meta } = geo;
+    if (geo.check) console.info(`[${id}] контроль привязки: угол дома ${geo.check.lat.toFixed(6)}, ${geo.check.lon.toFixed(6)} → ` +
+      `мир (${geo.check.world.map(v => v.toFixed(2)).join(", ")}) м, пиксель снимка по UV (${geo.check.pixelUV.map(v => v.toFixed(2))}) ` +
+      `и по Slippy Map (${geo.check.pixelSlippy.map(v => v.toFixed(2))}), расхождение ${geo.check.errorPx.toExponential(1)} пикс.`);
+
     const code = new Int16Array(geo.grid);
-    const area = { id, osm, meta, code, scene: new THREE.Scene(), chunks: [], nBuildings: geo.nBuildings };
+    const area = { id, osm, meta, code, scene: new THREE.Scene(), chunks: [], nBuildings: geo.nBuildings, check: geo.check };
     const o = maplibregl.MercatorCoordinate.fromLngLat(osm.origin, 0);
     area.origin = o; area.meter = o.meterInMercatorCoordinateUnits();
     const toGeo = g => {

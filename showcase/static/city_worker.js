@@ -12,6 +12,9 @@ const PALETTE = [
 const ROOFS = [[0.33, 0.42, 0.36], [0.42, 0.42, 0.44], [0.50, 0.30, 0.22], [0.30, 0.32, 0.34]];
 const CSS = { white: "#efefea", yellow: "#d9b45c", beige: "#d8c4a0", grey: "#9a9a98", gray: "#9a9a98",
   brown: "#8a5a3c", red: "#a8483a", pink: "#d49a90", green: "#8fa880", blue: "#8aa2bf", orange: "#d08a4a" };
+// Web Mercator как у тайлов Slippy Map: та же формула и для снимка, и для сцены.
+const lon2tile = (lon, z) => (lon + 180) / 360 * 2 ** z;
+const lat2tile = (lat, z) => (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** z;
 const hash = n => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
 function colour(c) {
   if (!c) return null;
@@ -41,6 +44,8 @@ onmessage = async ({ data }) => {
     fetch(`/data/flood/${data.id}.bin`).then(r => r.arrayBuffer()),
   ]);
   const code = new Int16Array(grid);
+  // Границы склейки снимка z15 (city_sat.py): индексы крайних тайлов, а не bbox запроса.
+  const sat = await fetch(`/citysat/${data.id}.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   const [ox, oy] = mercator(osm.origin[0], osm.origin[1]);
   const meter = 1 / (2 * Math.PI * 6378137 * Math.cos(osm.origin[1] * Math.PI / 180));
   const toLocal = (x, y) => {
@@ -60,7 +65,12 @@ onmessage = async ({ data }) => {
     }
     return 2;
   };
-  const [SX, SY] = osm.size;                 // размер зоны, м: координаты текстур расчёта и снимка
+  const [SX, SY] = osm.size;                 // размер зоны, м: координаты текстуры расчёта
+  const lonLat = (x, y) => [osm.origin[0] + x / osm.kx, osm.origin[1] + y / osm.ky];
+  // UV склейки снимка: v = 0 — верхний (северный) край, как в картинке.
+  const satUV = (lon, lat) => sat
+    ? [(lon2tile(lon, sat.z) - sat.x0) / (sat.x1 - sat.x0), (lat2tile(lat, sat.z) - sat.y0) / (sat.y1 - sat.y0)]
+    : [0, 0];
   const chunks = new Map();
   const chunk = (x, y) => {
     const key = `${Math.floor(x / CHUNK)}_${Math.floor(y / CHUNK)}`;
@@ -79,9 +89,10 @@ onmessage = async ({ data }) => {
       s2 += x1 * y2 - x2 * y1; cx += x1; cy += y1;
     }
     const pts = s2 > 0 ? ring : ring.slice().reverse();
-    let gmin = Infinity;
+    let gmin = ground(cx / ring.length, cy / ring.length);
     for (const [x, y] of pts) gmin = Math.min(gmin, ground(x, y));
-    const base = gmin + b.b, top = gmin + b.h, H = b.h - b.b;
+    const SINK = b.b > 0 ? 0 : 1.5;                     // фундамент уходит в землю на 1,5 м
+    const base = gmin + b.b - SINK, top = gmin + b.h, H = b.h - b.b;
     const seed = hash(nb + 1);
     const industrial = /industrial|warehouse|garage|shed|hangar/.test(b.k);
     const col = colour(b.c) || (industrial ? [0.62, 0.36, 0.28] : PALETTE[Math.floor(seed * PALETTE.length)]);
@@ -105,7 +116,7 @@ onmessage = async ({ data }) => {
         B.push("normal", ty, -tx, 0); B.push("wtan", tx, ty, 0); B.push("fcolor", ...col);
         B.push("fparam", floorH, spacing, H, kind);
       }
-      B.push("wuv", u, b.b, u + len, b.b, u + len, b.h, u, b.h);
+      B.push("wuv", u, b.b - SINK, u + len, b.b - SINK, u + len, b.h, u, b.h);
       B.idx.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
       B.n += 4;
       u += len;
@@ -188,7 +199,8 @@ onmessage = async ({ data }) => {
     const c = code[j * gstep * meta.nx + i * gstep];
     const [lx, ly] = toLocal(x, y);
     G.push("position", lx, ly, c === meta.building ? ground(x, y) : c / 100);
-    G.push("normal", 0, 0, 1); G.push("suv", x / SX, y / SY); G.push("kind", c < 0 ? 4 : 3);
+    G.push("normal", 0, 0, 1); G.push("suv", ...satUV(...lonLat(x, y))); G.push("cuv", x / SX, y / SY);
+    G.push("kind", c < 0 ? 4 : 3);
   }
   for (let j = 0; j < gy - 1; j++) for (let i = 0; i < gx - 1; i++) {
     const a = j * gx + i; G.idx.push(a, a + 1, a + gx, a + 1, a + gx + 1, a + gx);
@@ -213,7 +225,16 @@ onmessage = async ({ data }) => {
     under[k] = code[k] === meta.building ? ground((k % meta.nx + 0.5) * meta.res, (Math.floor(k / meta.nx) + 0.5) * meta.res) : code[k] / 100;
   }
 
-  const out = { chunks: [], ground: G.pack(), water: W.pack(), under, nBuildings: nb, meta, grid,
+  // Контроль совпадения: угол первого дома → пиксель склейки по UV сцены и по формуле Slippy Map.
+  let check = null;
+  if (sat && osm.buildings.length) {
+    const [x, y] = osm.buildings[0].p[0], [lon, lat] = lonLat(x, y);
+    const [u, v] = satUV(lon, lat);
+    const pa = [u * sat.width, v * sat.height];
+    const pb = [(lon2tile(lon, sat.z) - sat.x0) * 256, (lat2tile(lat, sat.z) - sat.y0) * 256];
+    check = { lon, lat, world: toLocal(x, y), pixelUV: pa, pixelSlippy: pb, errorPx: Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) };
+  }
+  const out = { chunks: [], ground: G.pack(), water: W.pack(), under, nBuildings: nb, meta, grid, check,
     osm: { origin: osm.origin, size: osm.size, kx: osm.kx, ky: osm.ky, buildings: osm.buildings.length } };
   const transfer = [under.buffer, grid];
   for (const [key, { b, s }] of chunks) {

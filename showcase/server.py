@@ -77,6 +77,15 @@ def citysat(area: str):
     return FileResponse(p, media_type="image/jpeg")
 
 
+@app.get("/citysat/{area}.json")
+def citysat_meta(area: str):
+    """Границы склейки снимка зоны: индексы крайних тайлов z15 (для UV по Меркатору)."""
+    p = HERE / ".tiles" / "city" / f"{area}.json"
+    if not p.exists():
+        raise HTTPException(404, "Снимок зоны не скачан: python -m showcase.city_sat")
+    return FileResponse(p, media_type="application/json")
+
+
 @app.get("/attribution")
 def attribution():
     return {"text": ATTRIBUTION}
