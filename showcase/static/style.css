@@ -136,3 +136,12 @@ select option { background: #0b1522; }
   body:has(#section.on) #timeline { right: 14px; left: 14px; width: auto; bottom: 14px; }
   #section { width: calc(100% - 28px); top: auto; bottom: 70px; max-height: 55%; }
 }
+
+#city { left: 360px; bottom: 14px; width: 330px; display: none; }
+#city.on { display: block; }
+#city-name { font: 17px "Russo One"; margin-bottom: 4px; }
+.city-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; color: var(--muted); }
+.city-row b { color: var(--text); }
+#city-slider { width: 110px; }
+#city-stats { color: var(--muted); font-size: 11px; margin-top: 6px; }
+@media (max-width: 1400px), (max-height: 820px) { #city { left: 280px; width: 290px; } }

@@ -1,6 +1,7 @@
 // 3D-эмулятор Финского залива: MapLibre (карта и рельеф всего залива) + слой three.js
 // с водой из расчёта shallow_2d и разрезом волн по клику (showcase/section.py).
 import * as THREE from "three";
+import { City } from "./city.js";
 
 const $ = id => document.getElementById(id);
 const TERRAIN_EXAG = 15;            // рельеф суши и дна (MapLibre) ×15
@@ -10,11 +11,21 @@ const MODELS = [
   { id: "saint_venant", name: "Сен-Венан", color: "#ff7a2f" },
   { id: "boussinesq", name: "Буссинеск", color: "#2fe0d0" },
 ];
+// Детальные зоны города (showcase/osm_builder.py, flood_map.py).
+const CITY_AREAS = [
+  { id: "vo", name: "Васильевский остров", bbox: [59.921, 30.205, 59.957, 30.300] },
+  { id: "kronstadt", name: "Кронштадт", bbox: [59.982, 29.700, 60.012, 29.800] },
+];
+const CITY_ZOOM = 13.2;
+let city;
+const cityState = { area: null, loading: false, level: 0, steps: 0, manual: false, manualLevel: 2.81, saved: null };
 const FOCI = [
   { kicker: "Фокус 1", title: "Финский залив", center: [26.0, 59.85], zoom: 6.5, pitch: 50, bearing: 8 },
   { kicker: "Фокус 2", title: "Вход волны · 27° в. д.", center: [27.35, 60.0], zoom: 8.6, pitch: 66, bearing: 78 },
   { kicker: "Фокус 3", title: "Кронштадт и Котлин", center: [29.62, 59.99], zoom: 10.4, pitch: 68, bearing: 84 },
   { kicker: "Фокус 4", title: "Невская губа", center: [29.98, 59.94], zoom: 10.0, pitch: 62, bearing: 96 },
+  { kicker: "Фокус 5 · город", title: "Васильевский остров", center: [30.262, 59.9395], zoom: 15.6, pitch: 68, bearing: 70 },
+  { kicker: "Фокус 6 · город", title: "Кронштадт", center: [29.772, 59.9935], zoom: 15.6, pitch: 68, bearing: 30 },
 ];
 
 const state = {
@@ -116,7 +127,7 @@ const WATER_VS = `
 // декоративное ветровое волнение — 11 октав бегущих волн, каждая со скоростью
 // глубокой воды √(g·k); видны только те, что экран разрешает (без мерцания).
 const WATER_FS = `
-  uniform sampler2D seaTex; uniform vec3 camPos; uniform vec3 sunDir;
+  uniform sampler2D seaTex; uniform vec3 camPos; uniform vec3 sunDir; uniform vec4 cityBox;
   uniform float time; uniform float wind; uniform vec2 windDir; uniform float overlay;
   uniform float octaves;
   varying vec3 vColor; varying float vGlow; varying vec3 vN; varying vec3 vP; varying vec2 vUV;
@@ -128,6 +139,8 @@ const WATER_FS = `
   void main() {
     float code = texture2D(seaTex, vUV).r * 255.0;
     if (code < 0.7) discard;                                    // суша — берег по подробной маске
+    // Внутри зоны детального города воду рисует GPU-затопление (city.js).
+    if (vP.x > cityBox.x && vP.x < cityBox.z && vP.y > cityBox.y && vP.y < cityBox.w) discard;
     float depth = pow(max(code - 1.0, 0.0) / 25.0, 2.0);
 
     vec2 p = vP.xy;
@@ -260,7 +273,7 @@ function buildWater(scene) {
       // Низкое солнце на востоке: при взгляде к Петербургу по морю идёт солнечная дорожка.
       sunDir: { value: new THREE.Vector3(0.8, 0.12, 0.26).normalize() },
       wind: { value: 0 }, windDir: { value: new THREE.Vector2(1, 0.12).normalize() }, overlay: { value: 0 },
-      octaves: { value: 11 },
+      octaves: { value: 11 }, cityBox: { value: new THREE.Vector4(1e9, 1e9, -1e9, -1e9) },
     },
     vertexShader: WATER_VS, fragmentShader: WATER_FS,
   });
@@ -721,7 +734,7 @@ function keyName(e) { const k = e.key.toLowerCase(); return e.key === "Shift" ? 
 addEventListener("keydown", e => {
   if (e.target.closest("input, select")) return;
   const k = keyName(e);
-  if (["1", "2", "3", "4"].includes(k)) goFocus(+k - 1);
+  if (["1", "2", "3", "4", "5", "6"].includes(k)) goFocus(+k - 1);
   else if (k === " ") { e.preventDefault(); togglePlay(); }
   else if (k === "h") $("hud").classList.toggle("hidden");
   else if (k === "escape") closeSection();
@@ -752,7 +765,7 @@ const STYLE = {
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#2a3526" } },
     { id: "sat", type: "raster", source: "sat", paint: { "raster-saturation": -0.15, "raster-contrast": 0.1, "raster-brightness-max": 0.92 } },
-    { id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.85 } },
+    { id: "labels", type: "raster", source: "labels", maxzoom: 12.5, paint: { "raster-opacity": 0.85 } },
   ],
 };
 const map = new maplibregl.Map({
@@ -780,6 +793,15 @@ const waterLayer = {
     this.renderer.autoClear = false;
     buildWater(this.scene);
     buildParticles(this.scene);
+    city = new City(this.renderer);
+    window.gulfCity = city;
+  },
+  prerender() {
+    // Шаги GPU-затопления до основной отрисовки кадра.
+    if (!cityState.area) return;
+    this.renderer.resetState();
+    city.simulate(cityState.area, cityState.level, cityState.steps);
+    this.renderer.resetState();
   },
   render(gl, matrix) {
     const M = new THREE.Matrix4().fromArray(matrix).multiply(
@@ -792,6 +814,7 @@ const waterLayer = {
     water.mesh.material.uniforms.time.value = performance.now() / 1000;
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
+    if (cityState.area) city.render(cityState.area, matrix);
   },
 };
 
@@ -840,6 +863,62 @@ map.on("click", e => {
 });
 
 // ---------------------------------------------------------------------------
+// Детальный город: включается при приближении к зоне
+// ---------------------------------------------------------------------------
+function areaAt(lon, lat) {
+  return CITY_AREAS.find(a => lat > a.bbox[0] && lat < a.bbox[2] && lon > a.bbox[1] && lon < a.bbox[3]);
+}
+// Уровень моря у зоны из текущего 2D-сценария (ячейка у края зоны, см. flood_map.GAUGE).
+function seaLevelAt(meta) {
+  const m = state.manifest, n = m.nx * m.ny, [f, w] = frameAt(state.t);
+  const c = meta.gauge.iy * m.nx + meta.gauge.ix, s = state.scenario.eta_scale;
+  return s * ((1 - w) * state.eta[f * n + c] + w * state.eta[(f + 1) * n + c]);
+}
+async function enterCity(desc) {
+  cityState.loading = true;
+  toast(`<span class="spin"></span>Строю ${desc.name}: здания, улицы, набережные…`);
+  let area;
+  try { area = await city.load(desc.id); } catch (e) { toast(`Нет данных города: ${e.message || e}`, true); cityState.loading = false; return; }
+  cityState.loading = false;
+  if (cityState.area) return;
+  cityState.area = area;
+  area.group.visible = true;
+  cityState.saved = { exag: state.exag, terrain: map.getTerrain() };
+  state.exag = 1;
+  $("exag").value = 1; $("exag-v").textContent = "1";
+  map.setTerrain(null);                                  // в городе все высоты настоящие, в метрах
+  const [x0, y0] = local(desc.bbox[1], desc.bbox[0]), [x1, y1] = local(desc.bbox[3], desc.bbox[2]);
+  water.mesh.material.uniforms.cityBox.value.set(x0, y0, x1, y1);
+  $("city").classList.add("on");
+  $("city-name").textContent = desc.name;
+  $("city-stats").textContent = `${area.nBuildings.toLocaleString("ru")} зданий OSM · сетка затопления ${area.meta.nx} × ${area.meta.ny} по ${area.meta.res} м · сборка ${(area.buildMs / 1000).toFixed(1)} с`;
+  toast(`${desc.name}: ${area.nBuildings.toLocaleString("ru")} зданий`, false, 2500);
+}
+function leaveCity() {
+  const area = cityState.area;
+  if (!area) return;
+  area.group.visible = false;
+  cityState.area = null;
+  state.exag = cityState.saved.exag;
+  $("exag").value = state.exag; $("exag-v").textContent = state.exag;
+  map.setTerrain(cityState.saved.terrain);
+  water.mesh.material.uniforms.cityBox.value.set(1e9, 1e9, -1e9, -1e9);
+  $("city").classList.remove("on");
+}
+function updateCity(dt) {
+  if (!city || !state.manifest) return;
+  const c = map.getCenter(), z = map.getZoom();
+  const desc = z >= CITY_ZOOM ? areaAt(c.lng, c.lat) : null;
+  if (cityState.area && (!desc || desc.id !== cityState.area.id)) leaveCity();
+  if (desc && !cityState.area && !cityState.loading) enterCity(desc);
+  if (!cityState.area) { cityState.steps = 0; return; }
+  cityState.level = cityState.manual ? cityState.manualLevel : seaLevelAt(cityState.area.meta);
+  // Шаг 0,2 с; за кадр — до 60 шагов (затопление идёт быстрее реального времени в ~12 раз).
+  cityState.steps = state.playing ? 60 : 0;
+  $("city-level").textContent = `${cityState.level >= 0 ? "+" : ""}${cityState.level.toFixed(2)} м`;
+}
+
+// ---------------------------------------------------------------------------
 // Главный цикл
 // ---------------------------------------------------------------------------
 let last = performance.now(), fpsAcc = 0, fpsN = 0;
@@ -864,6 +943,7 @@ function loop(now) {
   $("time").textContent = fmtClock(state.t);
   $("scrub").value = 1000 * state.t / tEnd;
   fly(dt);
+  updateCity(dt);
   updateWater();
   updateParticles(state.playing ? dt : 0);
   drawGauge();
@@ -891,6 +971,9 @@ document.querySelectorAll("#color-mode button").forEach(b => b.addEventListener(
 }));
 document.querySelectorAll("#foci button").forEach(b => b.addEventListener("click", () => goFocus(+b.dataset.focus)));
 $("sec-close").addEventListener("click", closeSection);
+$("city-manual").addEventListener("change", e => { cityState.manual = e.target.checked; });
+$("city-slider").addEventListener("input", e => { cityState.manualLevel = +e.target.value; $("city-slider-v").textContent = (+e.target.value).toFixed(2); });
+$("city-reset").addEventListener("click", () => { if (cityState.area) city.reset(cityState.area); });
 $("sec-play").addEventListener("click", () => { state.secPlaying = !state.secPlaying; $("sec-play").textContent = state.secPlaying ? "❚❚" : "▶"; });
 $("sec-scrub").addEventListener("input", e => { if (state.section) state.secT = e.target.value / 1000 * (state.section.t.length - 1); });
 $("sec-rerun").addEventListener("click", () => { const q = state.section?.query; if (q) openSection(q.lon, q.lat); });

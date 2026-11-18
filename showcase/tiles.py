@@ -47,12 +47,16 @@ async def get_tile(src, z, x, y, timeout=45.0):
     p = path_for(src, z, x, y)
     if p.exists():
         return p.read_bytes(), MEDIA[SOURCES[src][1]]
-    lock = _locks.setdefault(str(p), asyncio.Lock())
+    lock = _locks.setdefault((str(p), id(asyncio.get_running_loop())), asyncio.Lock())
     async with lock:
         if p.exists():
             return p.read_bytes(), MEDIA[SOURCES[src][1]]
-        _client = _client or httpx.AsyncClient(timeout=timeout, follow_redirects=True,
-                                                headers={"User-Agent": "mathphis-waves-showcase"})
+        loop = asyncio.get_running_loop()
+        if _client is None or getattr(_client, "_loop", None) is not loop:
+            # Клиент привязан к циклу событий: новый asyncio.run — новый клиент.
+            _client = httpx.AsyncClient(timeout=timeout, follow_redirects=True,
+                                        headers={"User-Agent": "mathphis-waves-showcase"})
+            _client._loop = loop
         try:
             r = await _client.get(SOURCES[src][0].format(z=z, x=x, y=y))
         except httpx.HTTPError:

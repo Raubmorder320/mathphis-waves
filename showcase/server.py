@@ -50,6 +50,15 @@ async def tile(src: str, z: int, x: int, y: int):
     return Response(got[0], media_type=got[1], headers={"Cache-Control": "max-age=86400"})
 
 
+@app.get("/osm/{area}.json")
+def osm(area: str):
+    """Здания и улицы зоны (showcase/osm_builder.py): отдаём сжатый файл как есть, gzip."""
+    p = HERE / "data" / "osm" / f"{area}.json.gz"
+    if not p.exists():
+        raise HTTPException(404, "Нет данных OSM для этой зоны")
+    return Response(p.read_bytes(), media_type="application/json", headers={"Content-Encoding": "gzip"})
+
+
 @app.get("/attribution")
 def attribution():
     return {"text": ATTRIBUTION}
