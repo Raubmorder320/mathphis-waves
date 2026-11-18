@@ -94,6 +94,33 @@ def fetch(area_id, force=False, cached_only=False):
     return {"elements": list(elements.values())}
 
 
+def simplify(pts, tol):
+    """Дуглас — Пеккер: убрать точки, отклоняющиеся от хорды меньше tol (м)."""
+    if len(pts) < 3:
+        return pts
+    if pts[0] == pts[-1]:
+        # Замкнутый контур: хорда вырождена — делим по самой дальней от начала точке.
+        k = max(range(len(pts)), key=lambda m: math.hypot(pts[m][0] - pts[0][0], pts[m][1] - pts[0][1]))
+        if 0 < k < len(pts) - 1:
+            return simplify(pts[:k + 1], tol)[:-1] + simplify(pts[k:], tol)
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        i, j = stack.pop()
+        (x1, y1), (x2, y2) = pts[i], pts[j]
+        L = math.hypot(x2 - x1, y2 - y1) or 1e-9
+        best, k = 0.0, -1
+        for m in range(i + 1, j):
+            d = abs((x2 - x1) * (y1 - pts[m][1]) - (x1 - pts[m][0]) * (y2 - y1)) / L
+            if d > best:
+                best, k = d, m
+        if best > tol:
+            keep[k] = True
+            stack += [(i, k), (k, j)]
+    return [p for p, f in zip(pts, keep) if f]
+
+
 def _num(v):
     m = re.match(r"\s*([\d.]+)", str(v or ""))
     return float(m.group(1)) if m else None
@@ -139,7 +166,10 @@ def main(ids, cached_only=False):
                 for g in rings:
                     if len(g) < 4:
                         continue
-                    buildings.append(dict(p=xy(g[:-1]), h=round(hgt, 1), b=round(base, 1),
+                    ring = simplify(xy(g), 0.7)[:-1]           # замкнутый контур без повтора
+                    if len(ring) < 3:
+                        continue
+                    buildings.append(dict(p=ring, h=round(hgt, 1), b=round(base, 1),
                                           k=tags.get("building", "yes"), c=tags.get("building:colour"),
                                           r=tags.get("roof:shape"), rc=tags.get("roof:colour"),
                                           hist=1 if tags.get("heritage") or tags.get("historic") else 0))
@@ -149,11 +179,11 @@ def main(ids, cached_only=False):
                     continue
                 lanes = _num(tags.get("lanes"))
                 width = _num(tags.get("width")) or (lanes * 3.3 if lanes else ROAD_WIDTH[kind])
-                roads.append(dict(p=xy(el["geometry"]), w=round(width, 1), k=kind,
+                roads.append(dict(p=simplify(xy(el["geometry"]), 1.0), w=round(width, 1), k=kind,
                                   sw=SIDEWALK.get(kind, 0), br=1 if tags.get("bridge") else 0,
                                   tu=1 if tags.get("tunnel") else 0))
             elif el.get("geometry") and (tags.get("man_made") or tags.get("barrier")):
-                quays.append(dict(p=xy(el["geometry"]), k=tags.get("man_made") or tags.get("barrier")))
+                quays.append(dict(p=simplify(xy(el["geometry"]), 0.5), k=tags.get("man_made") or tags.get("barrier")))
 
         out = dict(id=aid, name=name, bbox=[s, w, n, e], origin=[lon0, lat0], kx=kx, ky=ky,
                    size=[round((e - w) * kx, 1), round((n - s) * ky, 1)],

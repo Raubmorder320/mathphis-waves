@@ -77,7 +77,9 @@ const FACADE_FS = COMMON + `
                 * step(1.0, uv.y) * step(uv.y, top - 1.0);
     float frame = inWin * (1.0 - step(lo.x + 0.03, fx) * step(fx, hi.x - 0.03) * step(lo.y + 0.03, fy) * step(fy, hi.y - 0.03));
     float mullion = inWin * step(abs(fx - 0.5), 0.012) * (shop ? 0.0 : 1.0);
-    if (inWin > 0.5 && mpp < 0.6) {
+    float dist = length(camPos - vP);
+    bool near = dist < 600.0 && mpp < 0.6;                         // LOD 0: окна с комнатами
+    if (inWin > 0.5 && near) {
       // Interior mapping: стена с окном — плоскость, комната глубиной 4 м за ней.
       vec3 T = normalize(vT), B = vec3(0.0, 0.0, 1.0);
       vec3 d = normalize(vec3(dot(-V, T), dot(-V, B), dot(-V, -n)));   // луч в координатах комнаты
@@ -99,10 +101,10 @@ const FACADE_FS = COMMON + `
       float F = 0.04 + 0.96 * pow(1.0 - clamp(dot(n, V), 0.0, 1.0), 5.0);
       vec3 glass = mix(roomC, skyColor(R), clamp(F + 0.15, 0.0, 0.9)) + pow(max(dot(R, sunDir), 0.0), 300.0) * 2.0;
       c = glass;
-    } else if (inWin > 0.5) {
+    } else if (inWin > 0.5 && dist < 1500.0) {
       c = mix(c, vec3(0.22, 0.28, 0.34), 0.55);                       // издалека окна — тёмные пятна
     }
-    c = mix(c, vec3(0.92, 0.90, 0.86) * (0.5 + 0.5 * diff), clamp(frame + mullion, 0.0, 1.0) * step(mpp, 0.6));
+    c = mix(c, vec3(0.92, 0.90, 0.86) * (0.5 + 0.5 * diff), clamp(frame + mullion, 0.0, 1.0) * (near ? 1.0 : 0.0));
     gl_FragColor = vec4(fogged(c, vP), 1.0);
   }`;
 
@@ -239,6 +241,11 @@ const DEPTH_FS = `
 // ---------------------------------------------------------------------------
 // Сборка города
 // ---------------------------------------------------------------------------
+const LOD_STREETS = 600;     // м — ближе видны улицы, бордюры и окна
+const LOD_BUILDINGS = 3000;  // м — дальше кварталы скрыты
+const SIM_HZ = 30;           // обновлений затопления в секунду, не больше
+const SIM_SUBSTEPS = 6;      // шагов расчёта за обновление
+
 export class City {
   // У каждой зоны своя сцена и свой центр координат: метры от юго-западного угла зоны.
   // Матрица «камера × центр зоны» считается в JS (двойная точность), поэтому вершины
@@ -249,6 +256,12 @@ export class City {
     this.areas = {};
     this.uniforms = { sunDir: { value: SUN }, camPos: { value: new THREE.Vector3() }, night: { value: 0.35 },
       time: { value: 0 } };
+    this.facadeMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: FACADE_VS,
+      fragmentShader: FACADE_FS, side: THREE.FrontSide });
+    this.streetMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: STREET_VS,
+      fragmentShader: STREET_FS, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.groundMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: STREET_VS, fragmentShader: STREET_FS });
+    this.lastSim = 0;
   }
 
   async load(id) {
@@ -258,206 +271,45 @@ export class City {
       fetch(`/data/flood/${id}.json`).then(r => r.json()),
       fetch(`/data/flood/${id}.bin`).then(r => r.arrayBuffer()),
     ]);
-    const area = { id, osm, meta, code: new Int16Array(grid), group: new THREE.Group(), scene: new THREE.Scene() };
-    area.scene.add(area.group);
+    const t0 = performance.now();
+    const code = new Int16Array(grid);
+    // Вся генерация геометрии — в воркере; сюда приходят готовые массивы вершин.
+    const geo = await new Promise((resolve, reject) => {
+      const w = new Worker("/static/city_worker.js", { type: "module" });
+      w.onmessage = e => { resolve(e.data); w.terminate(); };
+      w.onerror = e => { reject(new Error(e.message)); w.terminate(); };
+      w.postMessage({ osm, meta, code: grid.slice(0) }, []);
+    });
+    const area = { id, osm, meta, code, scene: new THREE.Scene(), chunks: [], nBuildings: geo.nBuildings };
     const o = maplibregl.MercatorCoordinate.fromLngLat(osm.origin, 0);
     area.origin = o; area.meter = o.meterInMercatorCoordinateUnits();
-    this.toLocal = (x, y) => {
-      const mc = maplibregl.MercatorCoordinate.fromLngLat([osm.origin[0] + x / osm.kx, osm.origin[1] + y / osm.ky], 0);
-      return [(mc.x - o.x) / area.meter, -(mc.y - o.y) / area.meter];
+    const toGeo = g => {
+      const bg = new THREE.BufferGeometry();
+      for (const [k, v] of Object.entries(g.attrs)) bg.setAttribute(k, new THREE.BufferAttribute(v, v.length / (g.attrs.position.length / 3)));
+      bg.setIndex(new THREE.BufferAttribute(g.index, 1));
+      bg.computeBoundingSphere();
+      return bg;
     };
-    area.toLocal = this.toLocal;
-    const t0 = performance.now();
-    this.buildBuildings(area);
-    this.buildStreets(area);
-    this.buildGround(area);
-    this.buildFlood(area);
+    let verts = 0;
+    for (const c of geo.chunks) {
+      const ch = { center: new THREE.Vector2(...c.center), b: null, s: null };
+      if (c.b) { ch.b = new THREE.Mesh(toGeo(c.b), this.facadeMat); verts += c.b.attrs.position.length / 3; }
+      if (c.s) { ch.s = new THREE.Mesh(toGeo(c.s), this.streetMat); verts += c.s.attrs.position.length / 3; }
+      for (const m of [ch.b, ch.s]) if (m) { m.frustumCulled = true; area.scene.add(m); }
+      area.chunks.push(ch);
+    }
+    area.groundMesh = new THREE.Mesh(toGeo(geo.ground), this.groundMat);
+    area.groundMesh.geometry.computeVertexNormals();
+    area.scene.add(area.groundMesh);
+    this.buildFlood(area, geo);
+    area.nVerts = verts;
     area.buildMs = performance.now() - t0;
     this.areas[id] = area;
     return area;
   }
 
-  // Отметка земли (м) в метрах зоны: здания — по земле вокруг.
-  ground(area, x, y) {
-    const m = area.meta;
-    const i = Math.min(Math.max(Math.round(x / m.res), 0), m.nx - 1);
-    const j = Math.min(Math.max(Math.round(y / m.res), 0), m.ny - 1);
-    const v = area.code[j * m.nx + i];
-    if (v === m.building) {             // под зданием — ближайшая не-здание ячейка
-      for (let r = 1; r < 12; r++) for (const [di, dj] of [[r, 0], [-r, 0], [0, r], [0, -r]]) {
-        const ii = i + di, jj = j + dj;
-        if (ii < 0 || jj < 0 || ii >= m.nx || jj >= m.ny) continue;
-        const w = area.code[jj * m.nx + ii];
-        if (w !== m.building) return Math.max(w / 100, 0.6);
-      }
-      return 2;
-    }
-    return v / 100;
-  }
-
-  buildBuildings(area) {
-    const pos = [], nrm = [], wuv = [], fparam = [], fcolor = [], wtan = [], idx = [];
-    let nb = 0;
-    for (const b of area.osm.buildings) {
-      const ring = b.p;
-      if (ring.length < 3) continue;
-      // Обход против часовой — нормали наружу.
-      let s2 = 0;
-      for (let i = 0; i < ring.length; i++) { const [x1, y1] = ring[i], [x2, y2] = ring[(i + 1) % ring.length]; s2 += x1 * y2 - x2 * y1; }
-      const pts = s2 > 0 ? ring : ring.slice().reverse();
-      let gmin = Infinity;
-      for (const [x, y] of pts) gmin = Math.min(gmin, this.ground(area, x, y));
-      const base = gmin + b.b, top = gmin + b.h, H = b.h - b.b;
-      const seed = hash(nb + 1);
-      const industrial = /industrial|warehouse|garage|shed|hangar/.test(b.k);
-      const col = parseColour(b.c) || (industrial ? [0.62, 0.36, 0.28] : PALETTE[Math.floor(seed * PALETTE.length)]);
-      const levels = Math.max(1, Math.round(H / 3.3));
-      const floorH = Math.min(Math.max(H / levels, 2.8), 4.6);
-      const spacing = industrial ? 4.2 : b.hist ? 3.4 : 3.0;
-      const kind = industrial ? 1 : 0;
-      const P = pts.map(([x, y]) => this.toLocal(x, y));
-      let u = 0;
-      for (let i = 0; i < P.length; i++) {
-        const [ax, ay] = P[i], [bx, by] = P[(i + 1) % P.length];
-        const len = Math.hypot(bx - ax, by - ay);
-        if (len < 0.05) continue;
-        const tx = (bx - ax) / len, ty = (by - ay) / len;
-        const v0 = pos.length / 3;
-        pos.push(ax, ay, base, bx, by, base, bx, by, top, ax, ay, top);
-        for (let k = 0; k < 4; k++) { nrm.push(ty, -tx, 0); wtan.push(tx, ty, 0); fcolor.push(...col);
-          fparam.push(floorH, spacing, H, kind); }
-        wuv.push(u, b.b, u + len, b.b, u + len, b.h, u, b.h);
-        idx.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
-        u += len;
-      }
-      // Крыша.
-      const contour = P.map(([x, y]) => new THREE.Vector2(x, y));
-      let tri;
-      try { tri = THREE.ShapeUtils.triangulateShape(contour, []); } catch { tri = []; }
-      const r0 = pos.length / 3;
-      const rc = parseColour(b.rc) || ROOFS[Math.floor(hash(nb + 7) * ROOFS.length)];
-      for (const [x, y] of P) { pos.push(x, y, top); nrm.push(0, 0, 1); wtan.push(1, 0, 0); wuv.push(0, 0);
-        fcolor.push(...rc); fparam.push(floorH, spacing, H, 2); }
-      for (const [a, bb, c] of tri) idx.push(r0 + a, r0 + bb, r0 + c);
-      nb++;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
-    geo.setAttribute("wuv", new THREE.Float32BufferAttribute(wuv, 2));
-    geo.setAttribute("fparam", new THREE.Float32BufferAttribute(fparam, 4));
-    geo.setAttribute("fcolor", new THREE.Float32BufferAttribute(fcolor, 3));
-    geo.setAttribute("wtan", new THREE.Float32BufferAttribute(wtan, 3));
-    geo.setIndex(idx);
-    const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: this.uniforms,
-      vertexShader: FACADE_VS, fragmentShader: FACADE_FS, side: THREE.DoubleSide }));
-    mesh.frustumCulled = false;
-    area.group.add(mesh);
-    area.nBuildings = nb;
-    area.nBuildingVerts = pos.length / 3;
-  }
-
-  buildStreets(area) {
-    const pos = [], nrm = [], suv = [], kind = [], idx = [];
-    const quad = (a, b, c, d, n, k, uv) => {
-      const v0 = pos.length / 3;
-      pos.push(...a, ...b, ...c, ...d);
-      for (let i = 0; i < 4; i++) { nrm.push(...n); kind.push(k); }
-      suv.push(...uv);
-      idx.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
-    };
-    const CURB = 0.18;
-    for (const r of area.osm.roads) {
-      if (r.tu) continue;
-      const P = r.p.map(([x, y]) => [...this.toLocal(x, y), x, y]);
-      const half = r.w / 2, sw = r.sw;
-      let u = 0;
-      for (let i = 0; i < P.length - 1; i++) {
-        const [ax, ay, axz, ayz] = P[i], [bx, by, bxz, byz] = P[i + 1];
-        const len = Math.hypot(bx - ax, by - ay);
-        if (len < 0.1) continue;
-        const nx = -(by - ay) / len, ny = (bx - ax) / len;
-        const za = r.br ? 6 : this.ground(area, axz, ayz) + 0.06, zb = r.br ? 6 : this.ground(area, bxz, byz) + 0.06;
-        const off = (p, s, z) => [p[0] + nx * s, p[1] + ny * s, z];
-        const A = [ax, ay], B = [bx, by];
-        quad(off(A, -half, za), off(B, -half, zb), off(B, half, zb), off(A, half, za), [0, 0, 1], 0,
-          [u, -half, u + len, -half, u + len, half, u, half]);
-        if (sw > 0 && !r.br) for (const side of [-1, 1]) {
-          const s0 = side * half, s1 = side * (half + sw);
-          // Тротуар на CURB выше дороги и вертикальная грань бордюра.
-          quad(off(A, s0, za + CURB), off(B, s0, zb + CURB), off(B, s1, zb + CURB), off(A, s1, za + CURB), [0, 0, 1], 1,
-            [u, 0, u + len, 0, u + len, 1, u, 1]);
-          quad(off(A, s0, za), off(B, s0, zb), off(B, s0, zb + CURB), off(A, s0, za + CURB), [-nx * side, -ny * side, 0], 2,
-            [u, 0, u + len, 0, u + len, 1, u, 1]);
-        }
-        u += len;
-      }
-    }
-    // Набережные: гранитная стенка от воды до парапета и верх парапета.
-    for (const q of area.osm.quays) {
-      const P = q.p.map(([x, y]) => [...this.toLocal(x, y), x, y]);
-      let u = 0;
-      for (let i = 0; i < P.length - 1; i++) {
-        const [ax, ay, axz, ayz] = P[i], [bx, by, bxz, byz] = P[i + 1];
-        const len = Math.hypot(bx - ax, by - ay);
-        if (len < 0.1) continue;
-        const nx = -(by - ay) / len, ny = (bx - ax) / len;
-        const za = Math.max(this.ground(area, axz, ayz), 0.6) + area.meta.parapet;
-        const zb = Math.max(this.ground(area, bxz, byz), 0.6) + area.meta.parapet;
-        for (const s of [0.35, -0.35]) quad([ax + nx * s, ay + ny * s, -1.5], [bx + nx * s, by + ny * s, -1.5],
-          [bx + nx * s, by + ny * s, zb], [ax + nx * s, ay + ny * s, za], [nx * Math.sign(s), ny * Math.sign(s), 0], 2,
-          [u, 0, u + len, 0, u + len, 1, u, 1]);
-        quad([ax - nx * 0.35, ay - ny * 0.35, za], [bx - nx * 0.35, by - ny * 0.35, zb],
-          [bx + nx * 0.35, by + ny * 0.35, zb], [ax + nx * 0.35, ay + ny * 0.35, za], [0, 0, 1], 2,
-          [u, 0, u + len, 0, u + len, 1, u, 1]);
-        u += len;
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
-    geo.setAttribute("suv", new THREE.Float32BufferAttribute(suv, 2));
-    geo.setAttribute("kind", new THREE.Float32BufferAttribute(kind, 1));
-    geo.setIndex(idx);
-    const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: this.uniforms,
-      vertexShader: STREET_VS, fragmentShader: STREET_FS, side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-    mesh.frustumCulled = false;
-    area.group.add(mesh);
-    area.nStreetVerts = pos.length / 3;
-  }
-
-  // Земля зоны по карте высот (шаг 8 м): дворы и газоны; под водой — дно.
-  buildGround(area) {
-    const m = area.meta, step = 2, gx = Math.floor(m.nx / step), gy = Math.floor(m.ny / step);
-    const pos = new Float32Array(gx * gy * 3), suv = new Float32Array(gx * gy * 2), kind = new Float32Array(gx * gy), nrm = new Float32Array(gx * gy * 3);
-    for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
-      const v = j * gx + i, x = (i * step + 0.5) * m.res, y = (j * step + 0.5) * m.res;
-      const [lx, ly] = this.toLocal(x, y);
-      const c = area.code[j * step * m.nx + i * step];
-      const z = c === m.building ? this.ground(area, x, y) : c / 100;
-      pos.set([lx, ly, z], 3 * v); nrm.set([0, 0, 1], 3 * v);
-      kind[v] = c < 0 ? 4 : 3;
-    }
-    const idx = [];
-    for (let j = 0; j < gy - 1; j++) for (let i = 0; i < gx - 1; i++) {
-      const a = j * gx + i; idx.push(a, a + 1, a + gx, a + 1, a + gx + 1, a + gx);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
-    geo.setAttribute("suv", new THREE.BufferAttribute(suv, 2));
-    geo.setAttribute("kind", new THREE.BufferAttribute(kind, 1));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({ uniforms: this.uniforms,
-      vertexShader: STREET_VS, fragmentShader: STREET_FS }));
-    mesh.frustumCulled = false;
-    area.group.add(mesh);
-  }
-
-  // GPU-затопление: текстура рельефа, пинг-понг глубины и расходов, сетка воды.
-  buildFlood(area) {
+  // GPU-затопление: текстура рельефа, пинг-понг глубины и расходов, сетка воды из воркера.
+  buildFlood(area, geo) {
     const m = area.meta, n = m.nx * m.ny;
     const T = new Float32Array(n * 4), S = new Float32Array(n * 4);
     for (let j = 0; j < m.ny; j++) for (let i = 0; i < m.nx; i++) {
@@ -466,53 +318,42 @@ export class City {
       const water = !wall && c < 0;
       const edge = water && (i === 0 || j === 0 || i === m.nx - 1 || j === m.ny - 1);
       // R — отметка дна (здание — 1000, стена), G — земля (под зданием — вокруг него).
-      const g = wall ? this.ground(area, (i + 0.5) * m.res, (j + 0.5) * m.res) : bed;
-      T.set([bed, g, edge ? 1 : 0, water ? 1 : 0], 4 * k);
+      T.set([bed, geo.under[k], edge ? 1 : 0, water ? 1 : 0], 4 * k);
       S[4 * k] = water ? -bed : 0;                       // уровень покоя 0 м
     }
-    const tex = (data) => { const t = new THREE.DataTexture(data, m.nx, m.ny, THREE.RGBAFormat, THREE.FloatType);
+    const tex = data => { const t = new THREE.DataTexture(data, m.nx, m.ny, THREE.RGBAFormat, THREE.FloatType);
       t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t; };
     const rt = () => new THREE.WebGLRenderTarget(m.nx, m.ny, { type: THREE.FloatType, format: THREE.RGBAFormat,
       minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
     const terrain = tex(T);
     const sim = { terrain, init: tex(S), state: [rt(), rt()], flux: [rt(), rt()], cur: 0, ready: false };
     const texel = new THREE.Vector2(1 / m.nx, 1 / m.ny);
+    // Шаг по времени из условия устойчивости: dt < res / √(g·d), d до ~10 м.
+    const dt = Math.min(0.5, 0.25 * m.res / Math.sqrt(9.81 * 10));
     const mk = fs => new THREE.ShaderMaterial({ vertexShader: SIM_VS, fragmentShader: fs, uniforms: {
       state: { value: null }, flux: { value: null }, terrain: { value: terrain }, texel: { value: texel },
-      dt: { value: 0.2 }, cell: { value: m.res }, sea: { value: 0 } } });
+      dt: { value: dt }, cell: { value: m.res }, sea: { value: 0 } } });
     sim.fluxMat = mk(FLUX_FS); sim.depthMat = mk(DEPTH_FS);
     sim.copyMat = new THREE.ShaderMaterial({ vertexShader: SIM_VS, uniforms: { src: { value: null } },
       fragmentShader: "uniform sampler2D src; varying vec2 vUv; void main() { gl_FragColor = texture2D(src, vUv); }" });
     sim.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), sim.copyMat);
     sim.scene = new THREE.Scene(); sim.scene.add(sim.quad);
     sim.cam = new THREE.Camera();
+    sim.dt = dt;
     area.sim = sim;
-
-    // Сетка воды: каждая вторая ячейка, высота из текстуры глубины в вершинном шейдере.
-    const step = 2, gx = Math.floor(m.nx / step), gy = Math.floor(m.ny / step);
-    const pos = new Float32Array(gx * gy * 3), cuv = new Float32Array(gx * gy * 2);
-    for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
-      const v = j * gx + i, x = (i * step + 0.5) * m.res, y = (j * step + 0.5) * m.res;
-      const [lx, ly] = this.toLocal(x, y);
-      pos.set([lx, ly, 0], 3 * v);
-      cuv.set([(i * step + 0.5) / m.nx, (j * step + 0.5) / m.ny], 2 * v);
-    }
-    const idx = [];
-    for (let j = 0; j < gy - 1; j++) for (let i = 0; i < gx - 1; i++) {
-      const a = j * gx + i; idx.push(a, a + 1, a + gx, a + 1, a + gx + 1, a + gx);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("cuv", new THREE.BufferAttribute(cuv, 2));
-    geo.setIndex(idx);
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute("position", new THREE.BufferAttribute(geo.water.attrs.position, 3));
+    wg.setAttribute("cuv", new THREE.BufferAttribute(geo.water.attrs.cuv, 2));
+    wg.setIndex(new THREE.BufferAttribute(geo.water.index, 1));
     sim.waterMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
       uniforms: { ...this.uniforms, state: { value: null }, terrain: { value: terrain }, texel: { value: texel },
         gridSize: { value: new THREE.Vector2(m.nx, m.ny) } },
       vertexShader: FLOODW_VS, fragmentShader: FLOODW_FS });
-    const mesh = new THREE.Mesh(geo, sim.waterMat);
+    const mesh = new THREE.Mesh(wg, sim.waterMat);
     mesh.frustumCulled = false;
     mesh.renderOrder = 3;
-    area.group.add(mesh);
+    area.scene.add(mesh);
+    area.waterVerts = geo.water.attrs.position.length / 3;
   }
 
   pass(sim, mat, target) {
@@ -521,16 +362,18 @@ export class City {
     this.renderer.render(sim.scene, sim.cam);
   }
 
-  // Шаги расчёта: seaLevel — уровень моря на краю зоны (м), steps — сколько шагов dt.
-  simulate(area, seaLevel, steps) {
-    const sim = area.sim, r = this.renderer;
+  // Расчёт затопления: не чаще SIM_HZ раз в секунду по SIM_SUBSTEPS шагов.
+  simulate(area, seaLevel, running) {
+    const sim = area.sim, r = this.renderer, now = performance.now();
+    if (sim.ready && (!running || now - this.lastSim < 1000 / SIM_HZ)) return;
+    this.lastSim = now;
     const prevTarget = r.getRenderTarget();
     if (!sim.ready) {
       sim.copyMat.uniforms.src.value = sim.init;
       this.pass(sim, sim.copyMat, sim.state[0]);
       sim.ready = true;
     }
-    for (let s = 0; s < steps; s++) {
+    for (let s = 0; s < (running ? SIM_SUBSTEPS : 0); s++) {
       const a = sim.cur, b = 1 - a;
       sim.fluxMat.uniforms.state.value = sim.state[a].texture;
       sim.fluxMat.uniforms.flux.value = sim.flux[a].texture;
@@ -553,9 +396,16 @@ export class City {
       new THREE.Matrix4().makeTranslation(area.origin.x, area.origin.y, area.origin.z)
         .scale(new THREE.Vector3(area.meter, -area.meter, area.meter)));
     this.camera.projectionMatrix = M;
-    const c = new THREE.Vector4(0, 0, 1, 0).applyMatrix4(M.clone().invert());
-    this.uniforms.camPos.value.set(c.x / c.w, c.y / c.w, c.z / c.w);
+    this.camera.projectionMatrixInverse.copy(M).invert();
+    const c = new THREE.Vector4(0, 0, 1, 0).applyMatrix4(this.camera.projectionMatrixInverse);
+    const cam = this.uniforms.camPos.value.set(c.x / c.w, c.y / c.w, c.z / c.w);
     this.uniforms.time.value = performance.now() / 1000;
+    // Уровни детализации по расстоянию от камеры до центра квартала (с учётом высоты).
+    for (const ch of area.chunks) {
+      const d = Math.hypot(ch.center.x - cam.x, ch.center.y - cam.y, cam.z);
+      if (ch.s) ch.s.visible = d < LOD_STREETS + 360;           // 360 м — полуразмер квартала
+      if (ch.b) ch.b.visible = d < LOD_BUILDINGS;
+    }
     this.renderer.render(area.scene, this.camera);
   }
 }

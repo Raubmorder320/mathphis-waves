@@ -25,7 +25,8 @@ from showcase.tiles import get_tile, path_for, tile_range
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "data" / "flood"
-RES = 4.0              # м на ячейку
+RES = 4.0              # м на ячейку — наименьший шаг
+MAX_GRID = 512         # ячеек по стороне, не больше
 Z = 14
 WATER_Z = 0.6          # м — ниже этого по рельефу считаем водой (Нева, залив)
 BED = -4.0             # м — дно рек и залива в пределах зоны (Нева 4–12 м; для затопления важна суша)
@@ -79,8 +80,10 @@ def main(ids):
         name, s, w, n, e = AREAS[aid]
         osm = json.loads(gzip.decompress((HERE / "data" / "osm" / f"{aid}.json.gz").read_bytes()))
         sx, sy = osm["size"]
-        nx, ny = int(sx / RES), int(sy / RES)
-        print(f"{name}: сетка {nx} × {ny} по {RES:g} м")
+        # Сетка расчёта не больше MAX_GRID по каждой стороне (видеокарта, 30 обновлений в секунду).
+        res = max(RES, max(sx, sy) / MAX_GRID)
+        nx, ny = int(sx / res), int(sy / res)
+        print(f"{name}: сетка {nx} × {ny} по {res:.1f} м")
         tiles = asyncio.run(fetch_dem((s, w, n, e)))
         ground = dem_grid((s, w, n, e), tiles, nx, ny)
         ground = np.nan_to_num(ground, nan=0.0)
@@ -88,12 +91,12 @@ def main(ids):
         # Растр в координатах зоны: x на восток, y на север; картинка — сверху север.
         def canvas():
             return Image.new("L", (nx, ny), 0)
-        to_px = lambda pts: [(x / RES, ny - 1 - y / RES) for x, y in pts]
+        to_px = lambda pts: [(x / res, ny - 1 - y / res) for x, y in pts]
         road = canvas(); dr = ImageDraw.Draw(road)
         for r in osm["roads"]:
             if r["tu"]:
                 continue
-            dr.line(to_px(r["p"]), fill=255, width=max(1, int(round((r["w"] + 2 * r["sw"]) / RES))))
+            dr.line(to_px(r["p"]), fill=255, width=max(1, int(round((r["w"] + 2 * r["sw"]) / res))))
         bld = canvas(); db = ImageDraw.Draw(bld)
         for b in osm["buildings"]:
             if b["b"] < 2.5:                                   # консоли и арки над землёй не перегораживают
@@ -113,7 +116,7 @@ def main(ids):
             for el in json.loads(wfile.read_text(encoding="utf-8"))["elements"]:
                 geoms = [el["geometry"]] if el.get("geometry") else [m["geometry"] for m in el.get("members", []) if m.get("geometry")]
                 for g in geoms:
-                    pts = [((p["lon"] - w) * osm["kx"] / RES, ny - 1 - (p["lat"] - s) * osm["ky"] / RES) for p in g if p]
+                    pts = [((p["lon"] - w) * osm["kx"] / res, ny - 1 - (p["lat"] - s) * osm["ky"] / res) for p in g if p]
                     if len(pts) > 1:
                         de.line(pts, fill=255, width=1)
             edge = np.asarray(edge)[::-1] > 0
@@ -134,7 +137,7 @@ def main(ids):
         # Земля без домов: минимум по окну 250 м (улицы и дворы) и сглаживание — грубый DTM из DSM.
         land_dsm = np.where(water | bld, np.nan, dsm)
         fill = np.where(np.isnan(land_dsm), np.nanpercentile(land_dsm, 20), land_dsm)
-        dtm = gaussian_filter(minimum_filter(fill, size=int(250 / RES)), sigma=60 / RES)
+        dtm = gaussian_filter(minimum_filter(fill, size=int(250 / res)), sigma=60 / res)
         ground = np.maximum(dtm, 1.0)
         print(f"  вода: {how}; земля: минимум DSM по окну 250 м, сглажено")
         bed = np.where(water, BED, ground)
@@ -145,7 +148,7 @@ def main(ids):
 
         g = gauge(lon2, lat2, h2, GAUGE[aid])
         land = ~water & ~bld
-        meta = dict(id=aid, name=name, bbox=[s, w, n, e], nx=nx, ny=ny, res=RES, origin=osm["origin"],
+        meta = dict(id=aid, name=name, bbox=[s, w, n, e], nx=nx, ny=ny, res=res, origin=osm["origin"],
                     kx=osm["kx"], ky=osm["ky"], building=BUILDING, bed=BED, parapet=PARAPET,
                     gauge=dict(iy=int(g[0]), ix=int(g[1])), water_source=how,
                     ground_note="земля — оценка из SRTM DSM фильтром минимума по окну 250 м, точность ±2–3 м",
