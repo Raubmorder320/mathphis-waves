@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Финский залив 3D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="banner"><div class="kicker" id="banner-kicker"></div><div class="title" id="banner-title"></div></div>
+  <div id="letterbox-top" class="letterbox"></div><div id="letterbox-bottom" class="letterbox"></div>
+
+  <div id="hud">
+    <header class="panel" id="top">
+      <div class="brand">ФИНСКИЙ ЗАЛИВ <span>3D</span></div>
+      <label>Сценарий
+        <select id="scenario"></select>
+      </label>
+      <div class="seg" id="color-mode">
+        <button data-mode="water" class="on">Вода</button>
+        <button data-mode="eta">Уровень η</button>
+        <button data-mode="nonlin">Нелинейность a/h</button>
+      </div>
+      <label class="slider">Вертикаль η ×<b id="exag-v">100</b>
+        <input id="exag" type="range" min="10" max="1000" step="10" value="100">
+      </label>
+    </header>
+
+    <div class="panel" id="clock">
+      <div class="time" id="time">0:00</div>
+      <div class="sub">модельное время</div>
+      <div class="wind"><svg viewBox="-20 -20 40 40" id="compass"><circle r="17"/><path id="arrow" d="M0 -13 L5 4 L0 1 L-5 4 Z"/><text y="-21" text-anchor="middle">С</text></svg>
+        <div><b id="wind-v">0</b> м/с<br><span id="wind-name">штиль</span></div></div>
+    </div>
+
+    <div class="panel" id="foci">
+      <div class="label">Фокусы</div>
+      <button data-focus="0"><kbd>1</kbd>Весь залив</button>
+      <button data-focus="1"><kbd>2</kbd>Вход волны, 27° в. д.</button>
+      <button data-focus="2"><kbd>3</kbd>Кронштадт и Котлин</button>
+      <button data-focus="3"><kbd>4</kbd>Невская губа и Петербург</button>
+      <div class="hint">Мышь — вращать и наклонять · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> полёт ·
+        <kbd>Q</kbd><kbd>E</kbd> поворот · <kbd>R</kbd><kbd>F</kbd> наклон · <kbd>Shift</kbd> быстрее ·
+        <kbd>Пробел</kbd> пауза · <kbd>H</kbd> скрыть интерфейс<br><b>Щёлкните по воде — откроется разрез волн</b></div>
+    </div>
+
+    <div class="panel" id="gauge">
+      <div class="label">Уровень у Петербурга <span id="gauge-now"></span></div>
+      <canvas id="gauge-canvas" width="360" height="150"></canvas>
+      <div id="alarm"></div>
+    </div>
+
+    <div class="panel" id="timeline">
+      <button id="play">❚❚</button>
+      <input id="scrub" type="range" min="0" max="1000" value="0">
+      <select id="speed"><option value="600">×600</option><option value="1800" selected>×1800</option><option value="3600">×3600</option></select>
+      <span id="fps"></span>
+    </div>
+
+    <aside class="panel" id="section">
+      <div class="sec-head">
+        <div><div class="label">Разрез волн</div><div id="sec-title">—</div></div>
+        <button id="sec-close" title="Закрыть">✕</button>
+      </div>
+      <div class="sec-params">
+        <label>a, м <input id="sec-a" type="number" min="0.05" max="3" step="0.05" value="0.5"></label>
+        <label>λ, км <input id="sec-l" type="number" min="2" max="40" step="1" value="10"></label>
+        <button id="sec-rerun">Пересчитать</button>
+      </div>
+      <canvas id="sec-canvas" width="520" height="230"></canvas>
+      <div class="sec-time"><button id="sec-play">❚❚</button><input id="sec-scrub" type="range" min="0" max="1000" value="0"><span id="sec-t"></span></div>
+      <div class="legend">
+        <span class="l-linear">линейная</span><span class="l-sv">Сен-Венан</span><span class="l-b">Буссинеск</span><span class="l-2d">срез 2D-сценария</span>
+      </div>
+      <table id="sec-table"></table>
+      <div id="sec-note"></div>
+    </aside>
+
+    <div id="toast"></div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -170,8 +170,11 @@ def _fluxes(mesh, S, dx, dy):
     return dH, dqx, dqy
 
 
-def solve_2d(x, y, h, eta0, u0, bc, t_frames, a=0.0, wavelength=1.0, extra=None):
+def solve_2d(x, y, h, eta0, u0, bc, t_frames, a=0.0, wavelength=1.0, extra=None, return_uv=False):
     """Решить двумерные уравнения и вернуть (кадры η, наибольшее за всё время η).
+
+    return_uv=True — третьим и четвёртым элементом ещё кадры скоростей u и v (м/с),
+    для визуализации течений (showcase).
 
     bc: 'gulf' — суша (h ≤ 0) и края карты — стенки, запад открыт, туда приходит
     горб η = a·sin²(π·t/T), T = wavelength/√(g·h_запад); 'periodic' — периодика по x,
@@ -240,6 +243,9 @@ def solve_2d(x, y, h, eta0, u0, bc, t_frames, a=0.0, wavelength=1.0, extra=None)
     eta_max = frames[0].copy()
     t = float(t_frames[0])
     u, v = _velocity(H, qx), _velocity(H, qy)
+    if return_uv:
+        frames_u, frames_v = np.zeros_like(frames), np.zeros_like(frames)
+        frames_u[0], frames_v[0] = u, v
     for j in range(1, len(t_frames)):
         while t < t_frames[j] - 1e-9:
             c = np.sqrt(G * H)
@@ -255,6 +261,10 @@ def solve_2d(x, y, h, eta0, u0, bc, t_frames, a=0.0, wavelength=1.0, extra=None)
                 raise RuntimeError(f"Двумерный расчёт разошёлся при t = {t:.0f} с")
             eta_max = np.maximum(eta_max, eta(H))
         frames[j] = eta(H)
+        if return_uv:
+            frames_u[j], frames_v[j] = u, v
+    if return_uv:
+        return frames, eta_max, frames_u, frames_v
     return frames, eta_max
 
 
