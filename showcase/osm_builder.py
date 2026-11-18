@@ -37,6 +37,7 @@ ROAD_WIDTH = {   # м, полная ширина проезжей части
     "motorway": 22, "trunk": 18, "primary": 16, "secondary": 13, "tertiary": 10,
     "residential": 7, "unclassified": 6, "living_street": 5, "service": 4,
     "pedestrian": 6, "footway": 2.5, "path": 2, "cycleway": 2, "steps": 2.5,
+    "track": 3.5, "corridor": 2, "bridleway": 2, "platform": 4, "raceway": 8, "busway": 7, "road": 6,
 }
 SIDEWALK = {"primary": 4, "secondary": 3.5, "tertiary": 3, "residential": 2.5, "unclassified": 2, "trunk": 4}
 DEFAULT_HEIGHT = {   # м, если в OSM нет ни height, ни building:levels
@@ -175,13 +176,16 @@ def main(ids, cached_only=False):
                                           hist=1 if tags.get("heritage") or tags.get("historic") else 0))
             elif "highway" in tags and el.get("geometry"):
                 kind = tags["highway"]
-                if kind not in ROAD_WIDTH:
+                base_kind = kind.replace("_link", "")               # съезды — как основная дорога, уже
+                if base_kind not in ROAD_WIDTH:
                     continue
                 lanes = _num(tags.get("lanes"))
-                width = _num(tags.get("width")) or (lanes * 3.3 if lanes else ROAD_WIDTH[kind])
+                width = _num(tags.get("width")) or (lanes * 3.3 if lanes else
+                                                    ROAD_WIDTH[base_kind] * (0.7 if kind != base_kind else 1.0))
                 roads.append(dict(p=simplify(xy(el["geometry"]), 1.0), w=round(width, 1), k=kind,
-                                  sw=SIDEWALK.get(kind, 0), br=1 if tags.get("bridge") else 0,
-                                  tu=1 if tags.get("tunnel") else 0))
+                                  sw=SIDEWALK.get(base_kind, 0),
+                                  br=1 if tags.get("bridge") and tags.get("bridge") != "no" else 0,
+                                  tu=1 if tags.get("tunnel") and tags.get("tunnel") != "no" else 0))
             elif el.get("geometry") and (tags.get("man_made") or tags.get("barrier")):
                 quays.append(dict(p=simplify(xy(el["geometry"]), 0.5), k=tags.get("man_made") or tags.get("barrier")))
 

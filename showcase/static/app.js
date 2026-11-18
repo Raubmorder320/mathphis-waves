@@ -18,6 +18,8 @@ const CITY_AREAS = [
   { id: "kronstadt", name: "Кронштадт", bbox: [59.982, 29.700, 60.012, 29.800] },
 ];
 const CITY_ZOOM = 13.2;
+const COAST = { id: "coast", bbox: [59.84, 29.45, 60.10, 30.35], zoom: 12.3 };   // кольцо берега Невской губы
+const coastState = { area: null, loading: false, failed: false };
 let city, dive;
 const diveState = { level: 0, surface: 0, depthTimer: 0, bed: 0 };
 const cityState = { area: null, loading: false, level: 0, steps: 0, manual: false, manualLevel: 2.81, saved: null };
@@ -824,6 +826,7 @@ const waterLayer = {
     buildWater(this.scene);
     buildParticles(this.scene);
     city = new City(this.renderer);
+    if (SAFE) city.uniforms.quality.value = 0;
     dive = new Dive(this.renderer);
     window.gulfDive = dive;
     window.gulfCity = city;
@@ -862,9 +865,29 @@ const waterLayer = {
       return;
     }
     this.renderer.render(this.scene, this.camera);
+    if (coastState.area && coastState.on) city.render(coastState.area, matrix);
     if (cityState.area) city.render(cityState.area, matrix);
   },
 };
+
+// Диагностика: на чём рисует браузер. Программный рендер (SwiftShader) — главная причина
+// «зависаний» города: тогда всё считается процессором.
+const SAFE = new URLSearchParams(location.search).has("safe");
+function gpuInfo() {
+  const gl = map.getCanvas().getContext("webgl2") || map.getCanvas().getContext("webgl");
+  const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : "нет WebGL");
+}
+map.once("load", () => {
+  const r = gpuInfo();
+  $("fps").title = r;
+  console.info("Видеокарта:", r);
+  if (/swiftshader|software|llvmpipe|basic render/i.test(r)) {
+    toast(`Chrome рисует БЕЗ видеокарты (${r}). Включите: Настройки → Система → «Использовать графическое ускорение», ` +
+      `и перезапустите Chrome. Иначе город будет зависать.`, true, 20000);
+  }
+  if (SAFE) { map.setPixelRatio(1); toast("Безопасный режим: без затопления и комнат за окнами, разрешение 1", false, 4000); }
+});
 
 map.on("load", async () => {
   const m = await loadManifest();
@@ -931,7 +954,7 @@ async function enterCity(desc) {
   cityState.loading = false;
   if (cityState.area) return;
   cityState.area = area;
-  cityState.saved = { exag: state.exag, terrain: map.getTerrain() };
+  cityState.saved = coastState.on && coastState.saved ? coastState.saved : { exag: state.exag, terrain: map.getTerrain() };
   state.exag = 1;
   $("exag").value = 1; $("exag-v").textContent = "1";
   if (!dive?.active) map.setTerrain(null);               // в городе все высоты настоящие, в метрах
@@ -948,15 +971,36 @@ function leaveCity() {
   const area = cityState.area;
   if (!area) return;
   cityState.area = null;
-  state.exag = cityState.saved.exag;
+  state.exag = coastState.on ? 1 : cityState.saved.exag;
   $("exag").value = state.exag; $("exag-v").textContent = state.exag;
-  if (!dive?.active) map.setTerrain(cityState.saved.terrain);
+  if (!dive?.active && !coastState.on) map.setTerrain(cityState.saved.terrain);
   water.mesh.material.uniforms.cityBox.value.set(1e9, 1e9, -1e9, -1e9);
   water.geo.setIndex(water.trisFull);
   $("city").classList.remove("on");
 }
+// Кольцо берега: при приближении к Невской губе — дома, дороги и мосты на 1 км вглубь суши.
+function updateCoast() {
+  if (!city || dive?.active) return;
+  const c = map.getCenter(), z = map.getZoom(), b = COAST.bbox;
+  const want = z >= COAST.zoom && c.lat > b[0] && c.lat < b[2] && c.lng > b[1] && c.lng < b[3];
+  if (want && !coastState.area && !coastState.loading && !coastState.failed) {
+    coastState.loading = true;
+    city.load("coast").then(a => { coastState.area = a; }).catch(() => { coastState.failed = true; })
+      .finally(() => { coastState.loading = false; });
+  }
+  const on = want && !!coastState.area;
+  if (on !== !!coastState.on) {
+    coastState.on = on;
+    if (!cityState.area) {                               // кольцо стоит на плоской карте: рельеф выключаем
+      if (on) { coastState.saved = { exag: state.exag, terrain: map.getTerrain() }; map.setTerrain(null); state.exag = 1; }
+      else if (coastState.saved) { map.setTerrain(coastState.saved.terrain); state.exag = coastState.saved.exag; }
+      $("exag").value = state.exag; $("exag-v").textContent = state.exag;
+    }
+  }
+}
 function updateCity(dt) {
   if (!city || !state.manifest) return;
+  updateCoast();
   let c = map.getCenter(), z = map.getZoom();
   if (dive?.active) {                                     // в свободной камере — по её положению
     c = dive.lonLat(dive.camera.position.x, dive.camera.position.y);
@@ -967,7 +1011,7 @@ function updateCity(dt) {
   if (desc && !cityState.area && !cityState.loading) enterCity(desc);
   if (!cityState.area) { cityState.running = false; return; }
   cityState.level = cityState.manual ? cityState.manualLevel : seaLevelAt(cityState.area.meta);
-  cityState.running = state.playing;                    // частоту шагов ограничивает city.simulate
+  cityState.running = state.playing && !SAFE;            // частоту шагов ограничивает city.simulate
   $("city-level").textContent = `${cityState.level >= 0 ? "+" : ""}${cityState.level.toFixed(2)} м`;
 }
 
@@ -1031,8 +1075,15 @@ addEventListener("wheel", e => { if (dive?.active) dive.speed = Math.min(2000, M
 // ---------------------------------------------------------------------------
 // Главный цикл
 // ---------------------------------------------------------------------------
-let last = performance.now(), fpsAcc = 0, fpsN = 0, lowFps = 0;
+let last = performance.now(), fpsAcc = 0, fpsN = 0, lowFps = 0, lastPaint = 0, slowFrames = 0;
 function loop(now) {
+  if (document.hasFocus() && now - last > 100) {
+    if (++slowFrames >= 5 && city && city.uniforms.quality.value > 0.5) {
+      city.uniforms.quality.value = 0;
+      if (map.getPixelRatio() > 1) map.setPixelRatio(1);
+      toast("Видеокарта не успевает — упростил фасады и разрешение", false, 3000);
+    }
+  } else slowFrames = 0;
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   fpsAcc += dt; fpsN++;
@@ -1072,7 +1123,7 @@ function loop(now) {
     if (state.prevCurtain) updateCurtain(state.prevCurtain, state.prevSection, Math.min(ti, state.prevSection.t.length - 1));
     drawSection();
   }
-  map.triggerRepaint();
+  if (now - lastPaint >= 15.5) { map.triggerRepaint(); lastPaint = now; }
   requestAnimationFrame(loop);
 }
 

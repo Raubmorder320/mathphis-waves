@@ -38,14 +38,15 @@ class Buf {
 
 onmessage = async ({ data }) => {
   // Загрузка и разбор данных зоны — тоже здесь, чтобы главный поток не стоял на JSON.
-  const [osm, meta, grid] = await Promise.all([
-    fetch(`/osm/${data.id}.json`).then(r => r.json()),
-    fetch(`/data/flood/${data.id}.json`).then(r => r.json()),
-    fetch(`/data/flood/${data.id}.bin`).then(r => r.arrayBuffer()),
-  ]);
+  const osm = await fetch(`/osm/${data.id}.json`).then(r => r.json());
+  // Кольцо берега — без своей карты затопления: земля плоская (уровень карты).
+  const [meta, grid] = osm.flat
+    ? [{ nx: 2, ny: 2, res: 1e6, building: 32000, parapet: 1.0, flat: true }, new Int16Array(4).buffer]
+    : await Promise.all([fetch(`/data/flood/${data.id}.json`).then(r => r.json()),
+                         fetch(`/data/flood/${data.id}.bin`).then(r => r.arrayBuffer())]);
   const code = new Int16Array(grid);
   // Границы склейки снимка z15 (city_sat.py): индексы крайних тайлов, а не bbox запроса.
-  const sat = await fetch(`/citysat/${data.id}.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
+  const sat = osm.flat ? null : await fetch(`/citysat/${data.id}.json`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   const [ox, oy] = mercator(osm.origin[0], osm.origin[1]);
   const meter = 1 / (2 * Math.PI * 6378137 * Math.cos(osm.origin[1] * Math.PI / 180));
   const toLocal = (x, y) => {
@@ -74,7 +75,7 @@ onmessage = async ({ data }) => {
   const chunks = new Map();
   const chunk = (x, y) => {
     const key = `${Math.floor(x / CHUNK)}_${Math.floor(y / CHUNK)}`;
-    if (!chunks.has(key)) chunks.set(key, { b: new Buf(), s: new Buf() });
+    if (!chunks.has(key)) chunks.set(key, { b: new Buf(), s: new Buf(), d: new Buf() });
     return chunks.get(key);
   };
 
@@ -89,8 +90,8 @@ onmessage = async ({ data }) => {
       s2 += x1 * y2 - x2 * y1; cx += x1; cy += y1;
     }
     const pts = s2 > 0 ? ring : ring.slice().reverse();
-    let gmin = ground(cx / ring.length, cy / ring.length);
-    for (const [x, y] of pts) gmin = Math.min(gmin, ground(x, y));
+    let gmin = osm.flat ? 0 : ground(cx / ring.length, cy / ring.length);
+    if (!osm.flat) for (const [x, y] of pts) gmin = Math.min(gmin, ground(x, y));
     const SINK = b.b > 0 ? 0 : 1.5;                     // фундамент уходит в землю на 1,5 м
     const base = gmin + b.b - SINK, top = gmin + b.h, H = b.h - b.b;
     const seed = hash(nb + 1);
@@ -145,26 +146,57 @@ onmessage = async ({ data }) => {
     S.idx.push(v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3);
     S.n += 4;
   };
+  const FLAT = !!osm.flat;                              // кольцо берега: земля — плоская карта
+  const gz = (x, y) => (FLAT ? 0 : ground(x, y));
   for (const r of osm.roads) {
     if (r.tu) continue;
     const half = r.w / 2, sw = r.sw;
-    let u = 0;
+    // Мост: настил на высоте ~6 м над землёй/водой у концов, постоянный по длине.
+    let deck = 0;
+    if (r.br) {
+      const [x0, y0] = r.p[0], [x1, y1] = r.p[r.p.length - 1];
+      deck = Math.max(gz(x0, y0), gz(x1, y1), 0.6) + 5.5;
+    }
+    let u = 0, sincePier = 18;
     for (let i = 0; i < r.p.length - 1; i++) {
       const [axz, ayz] = r.p[i], [bxz, byz] = r.p[i + 1];
       const [ax, ay] = toLocal(axz, ayz), [bx, by] = toLocal(bxz, byz);
       const len = Math.hypot(bx - ax, by - ay);
       if (len < 0.1) continue;
-      const S = chunk(0.5 * (axz + bxz), 0.5 * (ayz + byz)).s;
+      const C = chunk(0.5 * (axz + bxz), 0.5 * (ayz + byz)), S = C.s, D = C.d;
       const nx = -(by - ay) / len, ny = (bx - ax) / len;
-      const za = r.br ? 6 : ground(axz, ayz) + 0.06, zb = r.br ? 6 : ground(bxz, byz) + 0.06;
+      const za = r.br ? deck : gz(axz, ayz) + 0.06, zb = r.br ? deck : gz(bxz, byz) + 0.06;
       const off = (x, y, s, z) => [x + nx * s, y + ny * s, z];
-      quad(S, off(ax, ay, -half, za), off(bx, by, -half, zb), off(bx, by, half, zb), off(ax, ay, half, za), [0, 0, 1], 0,
-        [u, -half, u + len, -half, u + len, half, u, half]);
-      if (sw > 0 && !r.br) for (const side of [-1, 1]) {
+      const W = r.br ? half + sw : half;                    // на мосту тротуары — часть настила
+      quad(S, off(ax, ay, -W, za), off(bx, by, -W, zb), off(bx, by, W, zb), off(ax, ay, W, za), [0, 0, 1], 0,
+        [u, -W, u + len, -W, u + len, W, u, W]);
+      if (r.br) {
+        for (const side of [-1, 1]) {
+          const e = side * W;
+          // Торец настила (толщина 1,2 м) и перила 1 м.
+          quad(D, off(ax, ay, e, za - 1.2), off(bx, by, e, zb - 1.2), off(bx, by, e, zb), off(ax, ay, e, za),
+            [nx * side, ny * side, 0], 2, [u, 0, u + len, 0, u + len, 1, u, 1]);
+          quad(D, off(ax, ay, e, za), off(bx, by, e, zb), off(bx, by, e, zb + 1.0), off(ax, ay, e, za + 1.0),
+            [nx * side, ny * side, 0], 2, [u, 0, u + len, 0, u + len, 1, u, 1]);
+        }
+        quad(D, off(ax, ay, W, za - 1.2), off(bx, by, W, zb - 1.2), off(bx, by, -W, zb - 1.2), off(ax, ay, -W, za - 1.2),
+          [0, 0, -1], 2, [u, 0, u + len, 0, u + len, 1, u, 1]);
+        // Опоры через каждые 35 м: столб 2 × 2 м до воды.
+        for (let t = 35 - sincePier; t < len; t += 35) {
+          const px = ax + (bx - ax) * t / len, py = ay + (by - ay) * t / len;
+          for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+            const qx = dx * nx * 1 - dy * ny * 1, qy = dx * ny * 1 + dy * nx * 1;
+            const rx = -qy, ry = qx;
+            quad(D, [px + qx + rx, py + qy + ry, -4], [px + qx - rx, py + qy - ry, -4],
+              [px + qx - rx, py + qy - ry, za - 1.2], [px + qx + rx, py + qy + ry, za - 1.2], [qx, qy, 0], 2, [0, 0, 1, 0, 1, 1, 0, 1]);
+          }
+        }
+        sincePier = (sincePier + len) % 35;
+      } else if (sw > 0) for (const side of [-1, 1]) {
         const s0 = side * half, s1 = side * (half + sw);
-        quad(S, off(ax, ay, s0, za + CURB), off(bx, by, s0, zb + CURB), off(bx, by, s1, zb + CURB), off(ax, ay, s1, za + CURB),
+        quad(D, off(ax, ay, s0, za + CURB), off(bx, by, s0, zb + CURB), off(bx, by, s1, zb + CURB), off(ax, ay, s1, za + CURB),
           [0, 0, 1], 1, [u, 0, u + len, 0, u + len, 1, u, 1]);
-        quad(S, off(ax, ay, s0, za), off(bx, by, s0, zb), off(bx, by, s0, zb + CURB), off(ax, ay, s0, za + CURB),
+        quad(D, off(ax, ay, s0, za), off(bx, by, s0, zb), off(bx, by, s0, zb + CURB), off(ax, ay, s0, za + CURB),
           [-nx * side, -ny * side, 0], 2, [u, 0, u + len, 0, u + len, 1, u, 1]);
       }
       u += len;
@@ -177,9 +209,9 @@ onmessage = async ({ data }) => {
       const [ax, ay] = toLocal(axz, ayz), [bx, by] = toLocal(bxz, byz);
       const len = Math.hypot(bx - ax, by - ay);
       if (len < 0.1) continue;
-      const S = chunk(0.5 * (axz + bxz), 0.5 * (ayz + byz)).s;
+      const S = chunk(0.5 * (axz + bxz), 0.5 * (ayz + byz)).d;
       const nx = -(by - ay) / len, ny = (bx - ax) / len;
-      const za = Math.max(ground(axz, ayz), 0.6) + meta.parapet, zb = Math.max(ground(bxz, byz), 0.6) + meta.parapet;
+      const za = Math.max(gz(axz, ayz), 0.6) + meta.parapet, zb = Math.max(gz(bxz, byz), 0.6) + meta.parapet;
       for (const s of [0.35, -0.35]) quad(S, [ax + nx * s, ay + ny * s, -1.5], [bx + nx * s, by + ny * s, -1.5],
         [bx + nx * s, by + ny * s, zb], [ax + nx * s, ay + ny * s, za], [nx * Math.sign(s), ny * Math.sign(s), 0], 2,
         [u, 0, u + len, 0, u + len, 1, u, 1]);
@@ -193,7 +225,7 @@ onmessage = async ({ data }) => {
   // Земля зоны — грубая сетка (≤ 60 тыс. вершин): рельеф сглаженный, детали дают улицы.
   const gstep = Math.max(1, Math.ceil(Math.sqrt(meta.nx * meta.ny / 60000)));
   const G = new Buf();
-  const gx = Math.floor(meta.nx / gstep), gy = Math.floor(meta.ny / gstep);
+  const gx = meta.flat ? 0 : Math.floor(meta.nx / gstep), gy = meta.flat ? 0 : Math.floor(meta.ny / gstep);
   for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
     const x = (i * gstep + 0.5) * meta.res, y = (j * gstep + 0.5) * meta.res;
     const c = code[j * gstep * meta.nx + i * gstep];
@@ -209,7 +241,7 @@ onmessage = async ({ data }) => {
   // Сетка воды затопления (≤ 100 тыс. вершин) с координатами в текстуре расчёта.
   const wstep = Math.max(1, Math.ceil(Math.sqrt(meta.nx * meta.ny / 100000)));
   const W = new Buf();
-  const wx = Math.floor(meta.nx / wstep), wy = Math.floor(meta.ny / wstep);
+  const wx = meta.flat ? 0 : Math.floor(meta.nx / wstep), wy = meta.flat ? 0 : Math.floor(meta.ny / wstep);
   for (let j = 0; j < wy; j++) for (let i = 0; i < wx; i++) {
     const [lx, ly] = toLocal((i * wstep + 0.5) * meta.res, (j * wstep + 0.5) * meta.res);
     W.push("position", lx, ly, 0);
@@ -237,11 +269,11 @@ onmessage = async ({ data }) => {
   const out = { chunks: [], ground: G.pack(), water: W.pack(), under, nBuildings: nb, meta, grid, check,
     osm: { origin: osm.origin, size: osm.size, kx: osm.kx, ky: osm.ky, buildings: osm.buildings.length } };
   const transfer = [under.buffer, grid];
-  for (const [key, { b, s }] of chunks) {
+  for (const [key, { b, s, d }] of chunks) {
     const [cx, cy] = key.split("_").map(Number);
     const [lx, ly] = toLocal((cx + 0.5) * CHUNK, (cy + 0.5) * CHUNK);
-    const item = { key, center: [lx, ly], b: b.n ? b.pack() : null, s: s.n ? s.pack() : null };
-    for (const g of [item.b, item.s]) if (g) { transfer.push(g.index.buffer); for (const a of Object.values(g.attrs)) transfer.push(a.buffer); }
+    const item = { key, center: [lx, ly], b: b.n ? b.pack() : null, s: s.n ? s.pack() : null, d: d.n ? d.pack() : null };
+    for (const g of [item.b, item.s, item.d]) if (g) { transfer.push(g.index.buffer); for (const a of Object.values(g.attrs)) transfer.push(a.buffer); }
     out.chunks.push(item);
   }
   for (const g of [out.ground, out.water]) { transfer.push(g.index.buffer); for (const a of Object.values(g.attrs)) transfer.push(a.buffer); }

@@ -40,13 +40,13 @@ const FACADE_VS = `
 const FACADE_FS = COMMON + `
   uniform float night;
   uniform sampler2D floodState; uniform sampler2D floodTerrain; uniform vec2 floodTexel; uniform float hasFlood;
+  uniform float floodLevel; uniform float quality;
   varying vec2 vUV; varying vec4 vParam; varying vec3 vCol; varying vec3 vN; varying vec3 vP; varying vec3 vT; varying vec2 vC;
   // Уровень воды у стены: наибольший из соседних мокрых ячеек снаружи дома (или −100).
   float floodSurface() {
     float z = -100.0;
-    for (int k = 0; k < 8; k++) {
-      float a = float(k) * 0.785398;
-      vec2 uv = vC + vec2(cos(a), sin(a)) * floodTexel * 1.6;
+    for (int k = 0; k < 4; k++) {
+      vec2 uv = vC + vec2(k == 0 ? 1.6 : k == 1 ? -1.6 : 0.0, k == 2 ? 1.6 : k == 3 ? -1.6 : 0.0) * floodTexel;
       vec4 t = texture2D(floodTerrain, uv);
       float d = texture2D(floodState, uv).r;
       if (t.r < 500.0 && d > 0.02) z = max(z, t.r + d);
@@ -91,7 +91,7 @@ const FACADE_FS = COMMON + `
     float frame = inWin * (1.0 - step(lo.x + 0.03, fx) * step(fx, hi.x - 0.03) * step(lo.y + 0.03, fy) * step(fy, hi.y - 0.03));
     float mullion = inWin * step(abs(fx - 0.5), 0.012) * (shop ? 0.0 : 1.0);
     float dist = length(camPos - vP);
-    bool near = dist < 600.0 && mpp < 0.6;                         // LOD 0: окна с комнатами
+    bool near = dist < 600.0 && mpp < 0.6 && quality > 0.5;        // LOD 0: окна с комнатами
     if (inWin > 0.5 && near) {
       // Interior mapping: стена с окном — плоскость, комната глубиной 4 м за ней.
       vec3 T = normalize(vT), B = vec3(0.0, 0.0, 1.0);
@@ -119,7 +119,7 @@ const FACADE_FS = COMMON + `
     }
     c = mix(c, vec3(0.92, 0.90, 0.86) * (0.5 + 0.5 * diff), clamp(frame + mullion, 0.0, 1.0) * (near ? 1.0 : 0.0));
     // Подтопление: ниже воды стена мокрая и тёмная, на уровне воды — светлая полоса.
-    if (hasFlood > 0.5) {
+    if (hasFlood > 0.5 && vP.z < floodLevel + 1.0) {          // выше уровня моря воды у стены быть не может
       float zs = floodSurface();
       if (zs > -50.0) {
         float below = zs - vP.z;
@@ -233,12 +233,11 @@ const GROUND_FS = COMMON + `
     c *= 0.75 + 0.35 * max(dot(n, sunDir), 0.0);
     // Мягкое затенение (AO) у стен: доля ячеек-зданий вокруг на 1 и 2 ячейки.
     float occ = 0.0;
-    for (int k = 0; k < 8; k++) {
-      float a = float(k) * 0.785398;
-      vec2 o = vec2(cos(a), sin(a)) * floodTexel;
-      occ += step(500.0, texture2D(floodTerrain, vC + o).r) * 0.6 + step(500.0, texture2D(floodTerrain, vC + 2.0 * o).r) * 0.4;
+    for (int k = 0; k < 4; k++) {
+      vec2 o = vec2(k == 0 ? 1.0 : k == 1 ? -1.0 : 0.0, k == 2 ? 1.0 : k == 3 ? -1.0 : 0.0) * floodTexel;
+      occ += step(500.0, texture2D(floodTerrain, vC + o).r);
     }
-    c *= 1.0 - 0.45 * clamp(occ / 8.0, 0.0, 1.0);
+    c *= 1.0 - 0.4 * clamp(occ / 4.0, 0.0, 1.0);
     gl_FragColor = vec4(fogged(c, vP), 1.0);
   }`;
 
@@ -293,7 +292,8 @@ const DEPTH_FS = `
 // ---------------------------------------------------------------------------
 // Сборка города
 // ---------------------------------------------------------------------------
-const LOD_STREETS = 600;     // м — ближе видны улицы, бордюры и окна
+const LOD_STREETS = 2500;    // м — полотно дорог и мостов
+const LOD_DETAILS = 600;     // м — бордюры, тротуары, перила, опоры; ближе — и окна с комнатами
 const LOD_BUILDINGS = 6000;  // м — дальше кварталы скрыты (до этого — простые блоки без окон)
 const SIM_HZ = 30;           // обновлений затопления в секунду, не больше
 const SIM_SUBSTEPS = 6;      // шагов расчёта за обновление
@@ -313,6 +313,7 @@ export class City {
     this.streetMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: STREET_VS,
       fragmentShader: STREET_FS, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.uniforms.floodState = { value: null }; this.uniforms.floodTerrain = { value: null };
+    this.uniforms.floodLevel = { value: 0 }; this.uniforms.quality = { value: 1 };
     this.uniforms.floodTexel = { value: new THREE.Vector2(1, 1) }; this.uniforms.hasFlood = { value: 0 };
     this.groundUniforms = { ...this.uniforms, sat: { value: null }, hasSat: { value: 0 } };
     this.groundMat = new THREE.ShaderMaterial({ uniforms: this.groundUniforms, vertexShader: GROUND_VS, fragmentShader: GROUND_FS });
@@ -347,18 +348,22 @@ export class City {
     };
     let verts = 0;
     for (const c of geo.chunks) {
-      const ch = { center: new THREE.Vector2(...c.center), b: null, s: null };
+      const ch = { center: new THREE.Vector2(...c.center), b: null, s: null, d: null };
       if (c.b) { ch.b = new THREE.Mesh(toGeo(c.b), this.facadeMat); verts += c.b.attrs.position.length / 3; }
       if (c.s) { ch.s = new THREE.Mesh(toGeo(c.s), this.streetMat); verts += c.s.attrs.position.length / 3; }
-      for (const m of [ch.b, ch.s]) if (m) { m.frustumCulled = true; area.scene.add(m); }
+      if (c.d) { ch.d = new THREE.Mesh(toGeo(c.d), this.streetMat); verts += c.d.attrs.position.length / 3; }
+      for (const m of [ch.b, ch.s, ch.d]) if (m) { m.frustumCulled = true; area.scene.add(m); }
       area.chunks.push(ch);
     }
-    area.groundMesh = new THREE.Mesh(toGeo(geo.ground), this.groundMat);
-    area.groundMesh.geometry.computeVertexNormals();
-    area.scene.add(area.groundMesh);
-    this.buildFlood(area, geo);
+    area.flat = !!meta.flat;
+    if (!area.flat) {                                    // у кольца берега нет своей земли и затопления
+      area.groundMesh = new THREE.Mesh(toGeo(geo.ground), this.groundMat);
+      area.groundMesh.geometry.computeVertexNormals();
+      area.scene.add(area.groundMesh);
+      this.buildFlood(area, geo);
+    }
     // Снимок зоны — асинхронно; без него земля процедурная.
-    new THREE.TextureLoader().load(`/citysat/${id}.jpg`, tex => {
+    if (!area.flat) new THREE.TextureLoader().load(`/citysat/${id}.jpg`, tex => {
       tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 8;
       area.sat = tex;
       if (this.active === area) { this.groundUniforms.sat.value = tex; this.groundUniforms.hasSat.value = 1; }
@@ -427,6 +432,8 @@ export class City {
 
   // Расчёт затопления: не чаще SIM_HZ раз в секунду по SIM_SUBSTEPS шагов.
   simulate(area, seaLevel, running) {
+    if (!area.sim) return;
+    this.uniforms.floodLevel.value = seaLevel;
     const sim = area.sim, r = this.renderer, now = performance.now();
     if (sim.ready && (!running || now - this.lastSim < 1000 / SIM_HZ)) return;
     this.lastSim = now;
@@ -451,11 +458,12 @@ export class City {
     sim.waterMat.uniforms.state.value = sim.state[sim.cur].texture;
   }
 
-  reset(area) { area.sim.ready = false; }
+  reset(area) { if (area.sim) area.sim.ready = false; }
 
   // Отрисовка зоны: matrix — матрица MapLibre для единиц Меркатора.
   activate(area) {
     this.active = area;
+    if (area.flat) return;
     this.groundUniforms.sat.value = area.sat || null; this.groundUniforms.hasSat.value = area.sat ? 1 : 0;
     this.uniforms.floodTerrain.value = area.sim.terrain;
     this.uniforms.floodTexel.value.set(1 / area.meta.nx, 1 / area.meta.ny);
@@ -463,8 +471,10 @@ export class City {
 
   render(area, matrix) {
     if (this.active !== area) this.activate(area);
-    this.uniforms.floodState.value = area.sim.state[area.sim.cur].texture;
-    this.uniforms.hasFlood.value = area.sim.ready ? 1 : 0;
+    if (area.sim) {
+      this.uniforms.floodState.value = area.sim.state[area.sim.cur].texture;
+      this.uniforms.hasFlood.value = area.sim.ready && this.uniforms.quality.value > 0.5 ? 1 : 0;
+    } else this.uniforms.hasFlood.value = 0;
     const M = new THREE.Matrix4().fromArray(matrix).multiply(
       new THREE.Matrix4().makeTranslation(area.origin.x, area.origin.y, area.origin.z)
         .scale(new THREE.Vector3(area.meter, -area.meter, area.meter)));
@@ -477,6 +487,7 @@ export class City {
     for (const ch of area.chunks) {
       const d = Math.hypot(ch.center.x - cam.x, ch.center.y - cam.y, cam.z);
       if (ch.s) ch.s.visible = d < LOD_STREETS + 360;           // 360 м — полуразмер квартала
+      if (ch.d) ch.d.visible = d < LOD_DETAILS + 360;
       if (ch.b) ch.b.visible = d < LOD_BUILDINGS;
     }
     this.renderer.render(area.scene, this.camera);
