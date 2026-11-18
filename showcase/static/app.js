@@ -2,6 +2,7 @@
 // с водой из расчёта shallow_2d и разрезом волн по клику (showcase/section.py).
 import * as THREE from "three";
 import { City } from "./city.js";
+import { Dive } from "./dive.js";
 
 const $ = id => document.getElementById(id);
 const TERRAIN_EXAG = 15;            // рельеф суши и дна (MapLibre) ×15
@@ -17,7 +18,8 @@ const CITY_AREAS = [
   { id: "kronstadt", name: "Кронштадт", bbox: [59.982, 29.700, 60.012, 29.800] },
 ];
 const CITY_ZOOM = 13.2;
-let city;
+let city, dive;
+const diveState = { level: 0, surface: 0, depthTimer: 0, bed: 0 };
 const cityState = { area: null, loading: false, level: 0, steps: 0, manual: false, manualLevel: 2.81, saved: null };
 const FOCI = [
   { kicker: "Фокус 1", title: "Финский залив", center: [26.0, 59.85], zoom: 6.5, pitch: 50, bearing: 8 },
@@ -137,8 +139,10 @@ const WATER_FS = `
     return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y); }
 
   void main() {
-    float code = texture2D(seaTex, vUV).r * 255.0;
-    if (code < 0.7) discard;                                    // суша — берег по подробной маске
+    vec4 st = texture2D(seaTex, vUV);
+    float code = max(st.r * 255.0, 1.0);
+    // Берег — по расстоянию до береговой линии (канал G, EMODnet): гладко, без ступенек пикселей.
+    if ((st.g * 255.0 - 128.0) * 40.0 < 0.0) discard;
     // Внутри зоны детального города воду рисует GPU-затопление (city.js).
     if (vP.x > cityBox.x && vP.x < cityBox.z && vP.y > cityBox.y && vP.y < cityBox.w) discard;
     float depth = pow(max(code - 1.0, 0.0) / 25.0, 2.0);
@@ -723,6 +727,7 @@ function goFocus(k) {
 const keys = new Set();
 function fly(dt) {
   if (!keys.size) return;
+  if (dive?.active) { dive.move(keys, dt); return; }      // свободная камера
   const fast = keys.has("shift") ? 3 : 1, v = 650 * dt * fast;
   let dx = 0, dy = 0;
   if (keys.has("w")) dy -= v; if (keys.has("s")) dy += v;
@@ -735,7 +740,7 @@ function fly(dt) {
   if (keys.has("z")) map.setZoom(map.getZoom() + 1.2 * dt * fast);
   if (keys.has("x")) map.setZoom(map.getZoom() - 1.2 * dt * fast);
 }
-const RU = { "ц": "w", "ф": "a", "ы": "s", "в": "d", "й": "q", "у": "e", "к": "r", "а": "f", "я": "z", "ч": "x", "р": "h" };
+const RU = { "п": "g", "ц": "w", "ф": "a", "ы": "s", "в": "d", "й": "q", "у": "e", "к": "r", "а": "f", "я": "z", "ч": "x", "р": "h" };
 function keyName(e) { const k = e.key.toLowerCase(); return e.key === "Shift" ? "shift" : RU[k] || k; }
 addEventListener("keydown", e => {
   if (e.target.closest?.("input, select")) return;
@@ -743,6 +748,7 @@ addEventListener("keydown", e => {
   if (["1", "2", "3", "4", "5", "6"].includes(k)) goFocus(+k - 1);
   else if (k === " ") { e.preventDefault(); togglePlay(); }
   else if (k === "h") $("hud").classList.toggle("hidden");
+  else if (k === "g") toggleDive();
   else if (k === "escape") closeSection();
   else keys.add(k);
 });
@@ -800,9 +806,12 @@ const waterLayer = {
     buildWater(this.scene);
     buildParticles(this.scene);
     city = new City(this.renderer);
+    dive = new Dive(this.renderer);
+    window.gulfDive = dive;
     window.gulfCity = city;
   },
   prerender() {
+    if (dive?.active && !cityState.area) return;
     // Шаги GPU-затопления до основной отрисовки кадра.
     if (!cityState.area) return;
     this.renderer.resetState();
@@ -819,6 +828,16 @@ const waterLayer = {
     water.mesh.material.uniforms.camPos.value.set(c.x / c.w, c.y / c.w, c.z / c.w);
     water.mesh.material.uniforms.time.value = performance.now() / 1000;
     this.renderer.resetState();
+    if (dive?.active) {
+      // Свободная камера: своё небо, дно и вода; город — той же матрицей камеры.
+      const cv = map.getCanvas();
+      const ll = dive.lonLat(dive.camera.position.x, dive.camera.position.y);
+      diveState.level = etaAt(ll.lng, ll.lat);
+      const c = cityState.area ? { bbox: CITY_AREAS.find(a => a.id === cityState.area.id).bbox, terrain: cityState.area.sim.terrain } : null;
+      diveState.surface = dive.render(cv.width, cv.height, performance.now() / 1000, diveState.level, c);
+      if (cityState.area) city.render(cityState.area, dive.mercatorMatrix().elements);
+      return;
+    }
     this.renderer.render(this.scene, this.camera);
     if (cityState.area) city.render(cityState.area, matrix);
   },
@@ -860,6 +879,7 @@ map.on("load", async () => {
 });
 
 map.on("click", e => {
+  if (dive?.active) return;
   const b = bbox(), { lng, lat } = e.lngLat;
   if (lng < b.lon0 || lng > b.lon1 || lat < b.lat0 || lat > b.lat1) {
     toast("Модель считает восточную часть залива (оранжевая рамка, 27–30,4° в. д.) — щёлкните внутри неё", true);
@@ -891,7 +911,7 @@ async function enterCity(desc) {
   cityState.saved = { exag: state.exag, terrain: map.getTerrain() };
   state.exag = 1;
   $("exag").value = 1; $("exag-v").textContent = "1";
-  map.setTerrain(null);                                  // в городе все высоты настоящие, в метрах
+  if (!dive?.active) map.setTerrain(null);               // в городе все высоты настоящие, в метрах
   const [x0, y0] = local(desc.bbox[1], desc.bbox[0]), [x1, y1] = local(desc.bbox[3], desc.bbox[2]);
   water.mesh.material.uniforms.cityBox.value.set(x0, y0, x1, y1);
   $("city").classList.add("on");
@@ -907,14 +927,18 @@ function leaveCity() {
   cityState.area = null;
   state.exag = cityState.saved.exag;
   $("exag").value = state.exag; $("exag-v").textContent = state.exag;
-  map.setTerrain(cityState.saved.terrain);
+  if (!dive?.active) map.setTerrain(cityState.saved.terrain);
   water.mesh.material.uniforms.cityBox.value.set(1e9, 1e9, -1e9, -1e9);
   water.geo.setIndex(water.trisFull);
   $("city").classList.remove("on");
 }
 function updateCity(dt) {
   if (!city || !state.manifest) return;
-  const c = map.getCenter(), z = map.getZoom();
+  let c = map.getCenter(), z = map.getZoom();
+  if (dive?.active) {                                     // в свободной камере — по её положению
+    c = dive.lonLat(dive.camera.position.x, dive.camera.position.y);
+    z = dive.camera.position.z < 2500 ? 16 : 10;
+  }
   const desc = z >= CITY_ZOOM ? areaAt(c.lng, c.lat) : null;
   if (cityState.area && (!desc || desc.id !== cityState.area.id)) leaveCity();
   if (desc && !cityState.area && !cityState.loading) enterCity(desc);
@@ -923,6 +947,63 @@ function updateCity(dt) {
   cityState.running = state.playing;                    // частоту шагов ограничивает city.simulate
   $("city-level").textContent = `${cityState.level >= 0 ? "+" : ""}${cityState.level.toFixed(2)} м`;
 }
+
+// ---------------------------------------------------------------------------
+// Свободная камера и подводный режим (dive.js)
+// ---------------------------------------------------------------------------
+function etaAt(lon, lat) {                     // уровень моря из 2D-сценария в точке, м
+  const m = state.manifest, n = m.nx * m.ny, [f] = frameAt(state.t);
+  return sampleField(state.eta, f * n, state.scenario.eta_scale, lon, lat) ?? 0;
+}
+const INTERACTIONS = ["dragPan", "dragRotate", "scrollZoom", "keyboard", "doubleClickZoom", "touchZoomRotate"];
+async function toggleDive() {
+  if (dive.active) return exitDive();
+  if (!dive.loaded) {
+    toast(`<span class="spin"></span>Загружаю дно EMODnet…`);
+    try { await dive.load(); } catch (e) { toast(`Нет данных дна: ${e.message || e}`, true); return; }
+  }
+  const c = map.getCenter();
+  dive.setWind(state.scenario.wind || 8, 270);
+  dive.enter(c.lng, c.lat, map.getBearing(), 30);
+  INTERACTIONS.forEach(k => map[k].disable());
+  // Слои карты под своим небом не нужны: не рисуем их и прячем метки.
+  for (const id of ["sat", "labels", "domain"]) map.setLayoutProperty(id, "visibility", "none");
+  document.body.classList.add("diving");
+  $("dive").classList.add("on");
+  toast("Свободная камера: щёлкните по картинке, чтобы управлять мышью. G — выйти", false, 3500);
+}
+function exitDive() {
+  const p = dive.camera.position, ll = dive.lonLat(p.x, p.y);
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(dive.camera.quaternion);
+  dive.active = false;
+  if (document.pointerLockElement) document.exitPointerLock();
+  INTERACTIONS.forEach(k => map[k].enable());
+  for (const id of ["sat", "labels", "domain"]) map.setLayoutProperty(id, "visibility", "visible");
+  document.body.classList.remove("diving");
+  $("dive").classList.remove("on");
+  const zoom = Math.min(17, Math.max(9, Math.log2(4e7 * Math.cos(ll.lat * Math.PI / 180) / Math.max(p.z, 30)) - 6));
+  map.jumpTo({ center: [ll.lng, ll.lat], zoom, pitch: 60, bearing: 90 - Math.atan2(dir.y, dir.x) * 180 / Math.PI });
+}
+function updateDive(dt) {
+  if (!dive?.active) return;
+  diveState.depthTimer -= dt;
+  const p = dive.camera.position, ll = dive.lonLat(p.x, p.y);
+  if (diveState.depthTimer <= 0) {                      // дисперсия — по глубине под камерой
+    diveState.depthTimer = 0.5;
+    diveState.bed = dive.elevationAt(ll.lng, ll.lat);
+    dive.setDepth(diveState.level - diveState.bed);
+  }
+  const above = p.z - diveState.surface;
+  $("dive-alt").textContent = dive.underwater ? `глубина ${(-above).toFixed(1)} м` : `над водой ${above.toFixed(1)} м`;
+  $("dive-bed").textContent = diveState.bed < diveState.level ? `дно на ${(diveState.level - diveState.bed).toFixed(1)} м` : "под камерой суша";
+  $("dive-speed").textContent = `${dive.speed.toFixed(0)} м/с`;
+  $("dive-wave").textContent = `Hs ≈ ${dive.Hs.toFixed(2)} м`;
+  $("dive-under").classList.toggle("on", !!dive.underwater);
+  $("dive-pos").textContent = `${ll.lat.toFixed(4)}° с. ш., ${ll.lng.toFixed(4)}° в. д.`;
+}
+map.getCanvas().addEventListener("click", () => { if (dive?.active && !document.pointerLockElement) map.getCanvas().requestPointerLock(); });
+addEventListener("mousemove", e => { if (dive?.active && document.pointerLockElement === map.getCanvas()) dive.look(e.movementX, e.movementY); });
+addEventListener("wheel", e => { if (dive?.active) dive.speed = Math.min(2000, Math.max(0.5, dive.speed * (e.deltaY < 0 ? 1.25 : 0.8))); }, { passive: true });
 
 // ---------------------------------------------------------------------------
 // Главный цикл
@@ -949,6 +1030,7 @@ function loop(now) {
   $("time").textContent = fmtClock(state.t);
   $("scrub").value = 1000 * state.t / tEnd;
   fly(dt);
+  updateDive(dt);
   updateCity(dt);
   updateWater();
   // Частицы ветра и течений в масштабе города не видны — не тратим на них кадр.
@@ -979,6 +1061,7 @@ document.querySelectorAll("#color-mode button").forEach(b => b.addEventListener(
 }));
 document.querySelectorAll("#foci button").forEach(b => b.addEventListener("click", () => goFocus(+b.dataset.focus)));
 $("sec-close").addEventListener("click", closeSection);
+$("dive-btn").addEventListener("click", () => toggleDive());
 $("city-manual").addEventListener("change", e => { cityState.manual = e.target.checked; });
 $("city-slider").addEventListener("input", e => { cityState.manualLevel = +e.target.value; $("city-slider-v").textContent = (+e.target.value).toFixed(2); });
 $("city-reset").addEventListener("click", () => { if (cityState.area) city.reset(cityState.area); });

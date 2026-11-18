@@ -50,6 +50,7 @@
       <button data-focus="3"><kbd>4</kbd>Невская губа и Петербург</button>
       <button data-focus="4"><kbd>5</kbd>Город: Васильевский остров</button>
       <button data-focus="5"><kbd>6</kbd>Город: Кронштадт</button>
+      <button id="dive-btn"><kbd>G</kbd>Свободная камера · под воду</button>
       <div class="hint">Мышь — вращать и наклонять · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> полёт ·
         <kbd>Q</kbd><kbd>E</kbd> поворот · <kbd>R</kbd><kbd>F</kbd> наклон · <kbd>Shift</kbd> быстрее ·
         <kbd>Пробел</kbd> пауза · <kbd>H</kbd> скрыть интерфейс<br><b>Щёлкните по воде — откроется разрез волн</b></div>
@@ -95,6 +96,14 @@
         <input type="range" id="city-slider" min="0" max="5" step="0.05" value="2.81"> <b id="city-slider-v">2.81</b> м</label>
       <button id="city-reset">Слить воду и начать заново</button>
       <div id="city-stats"></div>
+    </div>
+
+    <div class="panel" id="dive">
+      <div class="label">Свободная камера <span id="dive-under">ПОД ВОДОЙ</span></div>
+      <div class="dive-big" id="dive-alt">—</div>
+      <div id="dive-bed"></div><div id="dive-wave"></div><div id="dive-speed"></div><div id="dive-pos"></div>
+      <div class="hint">Щелчок — мышь · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>R</kbd><kbd>F</kbd> вверх-вниз ·
+        <kbd>Q</kbd><kbd>E</kbd> крен · <kbd>Shift</kbd> ×8 · колесо — скорость · <kbd>G</kbd> выход</div>
     </div>
 
     <div id="toast"></div>

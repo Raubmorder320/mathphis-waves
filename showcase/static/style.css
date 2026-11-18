@@ -145,3 +145,14 @@ select option { background: #0b1522; }
 #city-slider { width: 110px; }
 #city-stats { color: var(--muted); font-size: 11px; margin-top: 6px; }
 @media (max-width: 1400px), (max-height: 820px) { #city { left: 280px; width: 290px; } }
+
+#dive { left: 50%; top: 14px; transform: translateX(-50%); width: 340px; display: none; text-align: center; }
+#dive.on { display: block; }
+.dive-big { font: 26px "Russo One"; }
+#dive div { color: var(--muted); }
+#dive .hint { font-size: 11px; line-height: 1.8; margin-top: 4px; }
+#dive-under { display: none; color: #2fe0d0; margin-left: 6px; }
+#dive-under.on { display: inline; animation: blink 1.2s infinite; }
+body:has(#dive.on) #top, body:has(#dive.on) #section { display: none; }
+
+body.diving .maplibregl-marker { display: none; }
