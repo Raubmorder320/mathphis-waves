@@ -1,0 +1,328 @@
+{
+  "records": [
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 13150.0,
+        "boussinesq": 13100.0,
+        "boussinesq_no_breaking": 13100.0
+      },
+      "common_cutoff_s": 13100.0,
+      "last_included_frame_s": 13075.0,
+      "front_doubling": {
+        "x_m": 71547.82494421536,
+        "distance_to_shore_m": 109872.96730736084,
+        "depth_m": 22.431021424270135,
+        "ratio": 2.00401654236701,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 0.2,
+      "params": {
+        "a": 0.2,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 1.8060775314535094e-15
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 13075.0,
+        "boussinesq": 13000.0,
+        "boussinesq_no_breaking": 13000.0
+      },
+      "common_cutoff_s": 13000.0,
+      "last_included_frame_s": 12975.0,
+      "front_doubling": {
+        "x_m": 53065.58173358604,
+        "distance_to_shore_m": 128355.21051799017,
+        "depth_m": 18.691327578413702,
+        "ratio": 2.0432760713524303,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 0.35,
+      "params": {
+        "a": 0.35,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 13000.0,
+        "boussinesq": 12925.0,
+        "boussinesq_no_breaking": 12925.0
+      },
+      "common_cutoff_s": 12925.0,
+      "last_included_frame_s": 12900.0,
+      "front_doubling": {
+        "x_m": 49380.471890975896,
+        "distance_to_shore_m": 132040.3203606003,
+        "depth_m": 19.311995071672847,
+        "ratio": 2.026124866947488,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 0.5,
+      "params": {
+        "a": 0.5,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0,
+      "refinement_peak_linf_over_a": {
+        "linear": 0.859773179597102,
+        "saint_venant": 0.09274832464675598,
+        "boussinesq": 2.02402222516437
+      },
+      "refinement_shared_cutoff_s": 12925.0,
+      "refinement_matched_window": {
+        "linear": {
+          "all_visited_linf_over_a": 0.3910501055405795,
+          "depth_ge_5m_linf_over_a": 0.024727328819817984
+        },
+        "saint_venant": {
+          "all_visited_linf_over_a": 0.09274832464675598,
+          "depth_ge_5m_linf_over_a": 0.09274832464675598
+        },
+        "boussinesq": {
+          "all_visited_linf_over_a": 2.02402222516437,
+          "depth_ge_5m_linf_over_a": 2.02402222516437
+        }
+      },
+      "refined_front_doubling": {
+        "x_m": 49068.6549042935,
+        "distance_to_shore_m": 132352.1373472827,
+        "depth_m": 19.92952096330484,
+        "ratio": 2.018093724339052,
+        "left_censored_at_packet_edge": false
+      },
+      "refinement_note": "each run uses its measured pre-boundary cutoff; includes window sensitivity",
+      "refined_cutoff_s": 12962.5
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 12900.0,
+        "boussinesq": 12825.0,
+        "boussinesq_no_breaking": 12825.0
+      },
+      "common_cutoff_s": 12825.0,
+      "last_included_frame_s": 12800.0,
+      "front_doubling": {
+        "x_m": 45071.72807500096,
+        "distance_to_shore_m": 136349.06417657525,
+        "depth_m": 31.66416558659819,
+        "ratio": 2.031079262654975,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 0.7,
+      "params": {
+        "a": 0.7,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 12775.0,
+        "boussinesq": 12700.0,
+        "boussinesq_no_breaking": 12700.0
+      },
+      "common_cutoff_s": 12700.0,
+      "last_included_frame_s": 12675.0,
+      "front_doubling": {
+        "x_m": 39629.10430745368,
+        "distance_to_shore_m": 141791.68794412253,
+        "depth_m": 35.589000073644335,
+        "ratio": 2.0022963591822265,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 1.0,
+      "params": {
+        "a": 1.0,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 12675.0,
+        "boussinesq": 12525.0,
+        "boussinesq_no_breaking": 12525.0
+      },
+      "common_cutoff_s": 12525.0,
+      "last_included_frame_s": 12500.0,
+      "front_doubling": {
+        "x_m": 36227.464452736625,
+        "distance_to_shore_m": 145193.32779883957,
+        "depth_m": 41.92398751212441,
+        "ratio": 2.015599852339011,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 1.3,
+      "params": {
+        "a": 1.3,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 12575.0,
+        "boussinesq": 12200.0,
+        "boussinesq_no_breaking": 12200.0
+      },
+      "common_cutoff_s": 12200.0,
+      "last_included_frame_s": 12175.0,
+      "front_doubling": {
+        "x_m": 32995.90659075542,
+        "distance_to_shore_m": 148424.8856608208,
+        "depth_m": 52.85989112846963,
+        "ratio": 2.01000863380745,
+        "left_censored_at_packet_edge": false
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 1.6,
+      "params": {
+        "a": 1.6,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0
+    },
+    {
+      "coastal_response_s": {
+        "linear": 13125.0,
+        "saint_venant": 12475.0,
+        "boussinesq": 11975.0,
+        "boussinesq_no_breaking": 11975.0
+      },
+      "common_cutoff_s": 11975.0,
+      "last_included_frame_s": 11950.0,
+      "front_doubling": {
+        "x_m": 30047.81871666731,
+        "distance_to_shore_m": 151372.9735349089,
+        "depth_m": 55.329421582996545,
+        "ratio": 2.083589662542681,
+        "left_censored_at_packet_edge": true
+      },
+      "definition": "first downstream visited node with max incoming negative slope / linear >2",
+      "amplitude_m": 2.0,
+      "params": {
+        "a": 2.0,
+        "wavelength": 10000.0,
+        "depth": 5.0,
+        "bottom": "gulf",
+        "depth_shore": 1.0,
+        "L": 1000.0,
+        "t_end": 18000.0,
+        "nx": 3201,
+        "n_frames": 721,
+        "extra": {}
+      },
+      "control_error": null,
+      "breaking_control_max_difference_over_a": 0.0,
+      "refinement_peak_linf_over_a": {
+        "linear": 0.6909880147484444,
+        "saint_venant": 0.10856848125848018,
+        "boussinesq": 2.0990505673766746
+      },
+      "refinement_shared_cutoff_s": 11975.0,
+      "refinement_matched_window": {
+        "linear": {
+          "all_visited_linf_over_a": 0.3433579299380929,
+          "depth_ge_5m_linf_over_a": 0.024727328819817984
+        },
+        "saint_venant": {
+          "all_visited_linf_over_a": 0.10856848125848018,
+          "depth_ge_5m_linf_over_a": 0.10856848125848018
+        },
+        "boussinesq": {
+          "all_visited_linf_over_a": 2.0990505673766746,
+          "depth_ge_5m_linf_over_a": 2.0990505673766746
+        }
+      },
+      "refined_front_doubling": {
+        "x_m": 30019.471717877997,
+        "distance_to_shore_m": 151401.3205336982,
+        "depth_m": 55.29754717288889,
+        "ratio": 2.067904430861379,
+        "left_censored_at_packet_edge": true
+      },
+      "refinement_note": "each run uses its measured pre-boundary cutoff; includes window sensitivity",
+      "refined_cutoff_s": 12000.0
+    }
+  ],
+  "warning": "front ratio is additional to d(t), not its replacement; unresolved coastal dispersion is not validated",
+  "window": "common interval strictly before first 0.001*a response at any model's actual wall"
+}

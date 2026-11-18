@@ -1,0 +1,33 @@
+{
+  "params": {
+    "a": 0.5,
+    "wavelength": 10000.0,
+    "depth": 5.0,
+    "bottom": "gulf",
+    "depth_shore": 1.0,
+    "L": 1000.0,
+    "t_end": 18000.0,
+    "nx": 3201,
+    "n_frames": 721,
+    "extra": {}
+  },
+  "stop_exclusive_s": 12000.0,
+  "output_intervals_s": [
+    25.0,
+    6.25
+  ],
+  "region": "x>30 km, h>=5 m, coarse positive peak>=0.1*a",
+  "records": {
+    "linear": {
+      "peak_linf_change_over_a": 0.03076615005836958,
+      "maximum_coarse_peak_m": 0.8697962788912854,
+      "maximum_dense_peak_m": 0.870521709075654
+    },
+    "boussinesq": {
+      "peak_linf_change_over_a": 1.2390579711037444,
+      "maximum_coarse_peak_m": 1.1813053731038807,
+      "maximum_dense_peak_m": 1.1697888881701317
+    }
+  },
+  "note": "Changing frame times also changes the subdivision of internal solver steps"
+}

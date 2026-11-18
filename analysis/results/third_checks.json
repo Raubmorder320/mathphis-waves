@@ -1,0 +1,41 @@
+{
+  "dispersion": {
+    "cases": 5,
+    "finite_diagnostics": true,
+    "identical_initial_surface": true,
+    "all_kh_below_0_3": true
+  },
+  "gulf": {
+    "cases": 8,
+    "pre_boundary_window": true,
+    "numerical_limitations": "See refinement errors and control_error in third_gulf.json",
+    "output_sampling_control": {
+      "linear": {
+        "peak_linf_change_over_a": 0.03076615005836958,
+        "maximum_coarse_peak_m": 0.8697962788912854,
+        "maximum_dense_peak_m": 0.870521709075654
+      },
+      "boussinesq": {
+        "peak_linf_change_over_a": 1.2390579711037444,
+        "maximum_coarse_peak_m": 1.1813053731038807,
+        "maximum_dense_peak_m": 1.1697888881701317
+      }
+    },
+    "cadence_peak_change_exceeds_0_1a": true,
+    "boussinesq_envelope_status": "convergence not claimed; inspect spatial and cadence errors"
+  },
+  "surge": {
+    "scenarios": 6,
+    "sourced_observations": 10,
+    "rest_control": true,
+    "historical_validation": "scale only; storm forcing and datum reconciliation unavailable"
+  },
+  "all_sections_present": true,
+  "figures_present": [
+    "third_dispersion_profiles.png",
+    "third_dispersion_metrics.png",
+    "third_gulf_envelopes.png",
+    "third_surge_observations.png",
+    "third_surge_zone.png"
+  ]
+}
