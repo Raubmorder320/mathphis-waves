@@ -16,8 +16,8 @@ def register(model: WaveModel) -> None:
 
 
 register(DemoModel())
-register(LinearModel())
-register(BoussinesqModel())
-register(KdVModel())
-register(SaintVenantModel())
-register(Shallow2DModel())
+register(LinearModel())         # база сравнения
+register(SaintVenantModel())    # ступень 1
+register(KdVModel())            # ступень 2
+register(BoussinesqModel())     # ступень 3
+register(Shallow2DModel())      # ступень 4
