@@ -30,6 +30,15 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Финский залив в 3D", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def no_stale_code(request, call_next):
+    """Страница и скрипты — без кэша браузера: после правок всегда свежий код."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 app.mount("/data", StaticFiles(directory=HERE / "data"), name="data")
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 
@@ -57,6 +66,15 @@ def osm(area: str):
     if not p.exists():
         raise HTTPException(404, "Нет данных OSM для этой зоны")
     return Response(p.read_bytes(), media_type="application/json", headers={"Content-Encoding": "gzip"})
+
+
+@app.get("/citysat/{area}.jpg")
+def citysat(area: str):
+    """Спутниковый снимок зоны города (showcase/city_sat.py; кэш, в git не попадает)."""
+    p = HERE / ".tiles" / "city" / f"{area}.jpg"
+    if not p.exists():
+        raise HTTPException(404, "Снимок зоны не скачан: python -m showcase.city_sat")
+    return FileResponse(p, media_type="image/jpeg")
 
 
 @app.get("/attribution")

@@ -142,7 +142,8 @@ const WATER_FS = `
     vec4 st = texture2D(seaTex, vUV);
     float code = max(st.r * 255.0, 1.0);
     // Берег — по расстоянию до береговой линии (канал G, EMODnet): гладко, без ступенек пикселей.
-    if ((st.g * 255.0 - 128.0) * 40.0 < 0.0) discard;
+    float shoreDist = (st.g * 255.0 - 128.0) * 40.0;
+    if (shoreDist < 0.0) discard;
     // Внутри зоны детального города воду рисует GPU-затопление (city.js).
     if (vP.x > cityBox.x && vP.x < cityBox.z && vP.y > cityBox.y && vP.y < cityBox.w) discard;
     float depth = pow(max(code - 1.0, 0.0) / 25.0, 2.0);
@@ -199,6 +200,10 @@ const WATER_FS = `
 
     // Режимы «уровень η» и «нелинейность a/h» — цвет расчёта поверх воды.
     c = mix(c, vColor * (0.55 + 0.45 * clamp(dot(n, sunDir), 0.0, 1.0)) + vColor * vGlow * 0.6, overlay);
+
+    // Береговая линия: светлая кромка ~2 пикселя при любом масштабе (и 30 м прибоя вблизи).
+    float shoreLine = 1.0 - smoothstep(mpp * 1.2, mpp * 2.5 + 12.0, shoreDist);
+    c = mix(c, vec3(0.92, 0.97, 1.0), shoreLine * 0.55);
 
     // Дымка к горизонту.
     float fog = 1.0 - exp(-dist / 420000.0);
@@ -306,7 +311,13 @@ const ETA_RAMP = [[-1, [0.13, 0.35, 0.85]], [0, [0.88, 0.93, 0.98]], [1, [0.92, 
 const NONLIN_RAMP = [[0, [0.05, 0.20, 0.45]], [0.05, [0.10, 0.45, 0.70]], [0.1, [0.98, 0.86, 0.25]],
   [0.2, [1.0, 0.52, 0.10]], [0.3, [1.0, 0.18, 0.12]], [0.6, [1.0, 0.0, 0.35]]];
 
-function updateWater() {
+let waterTimer = 0;
+function updateWater(dt = 0) {
+  if (cityState.area || dive?.active) {                // там вода залива вдали — хватит 10 раз в секунду
+    waterTimer -= dt;
+    if (waterTimer > 0) return;
+    waterTimer = 0.1;
+  }
   const m = state.manifest, n = m.nx * m.ny;
   const [f, w] = frameAt(state.t);
   const s = state.scenario.eta_scale, E = state.eta;
@@ -341,7 +352,13 @@ function updateWater() {
     nrm[3 * v] = -dzx * inv; nrm[3 * v + 1] = -dzy * inv; nrm[3 * v + 2] = inv;
   }
   const a = water.geo.attributes;
-  a.position.needsUpdate = a.normal.needsUpdate = a.color.needsUpdate = a.glow.needsUpdate = true;
+  // Загружаем на видеокарту только полосу вершин модельной части (а не весь залив).
+  const lo = water.inModel[0], hi = water.inModel[water.inModel.length - 1] + 1;
+  for (const [attr, k] of [[a.position, 3], [a.normal, 3], [a.color, 3], [a.glow, 1]]) {
+    attr.clearUpdateRanges?.();
+    attr.addUpdateRange ? attr.addUpdateRange(lo * k, (hi - lo) * k) : (attr.updateRange = { offset: lo * k, count: (hi - lo) * k });
+    attr.needsUpdate = true;
+  }
   const un = water.mesh.material.uniforms;
   un.overlay.value = state.mode === "water" ? 0 : 0.8;
   un.wind.value = state.scenario.wind;
@@ -796,6 +813,7 @@ window.gulfPerf = () => {            // время одного кадра бе�
     overlay: water.mesh.material.uniforms.overlay.value, octaves: water.mesh.material.uniforms.octaves.value };
 };
 
+const mp_canvas = () => map.getCanvas();
 const waterLayer = {
   id: "gulf-3d", type: "custom", renderingMode: "3d",
   onAdd(mp, gl) {
@@ -819,6 +837,11 @@ const waterLayer = {
     this.renderer.resetState();
   },
   render(gl, matrix) {
+    const cvs = mp_canvas();
+    if (cvs.width !== this.w || cvs.height !== this.h) {
+      this.w = cvs.width; this.h = cvs.height;
+      this.renderer.setPixelRatio(1); this.renderer.setSize(this.w, this.h, false);
+    }
     const M = new THREE.Matrix4().fromArray(matrix).multiply(
       new THREE.Matrix4().makeTranslation(origin.x, origin.y, origin.z)
         .scale(new THREE.Vector3(meter, -meter, meter)));
@@ -1008,7 +1031,7 @@ addEventListener("wheel", e => { if (dive?.active) dive.speed = Math.min(2000, M
 // ---------------------------------------------------------------------------
 // Главный цикл
 // ---------------------------------------------------------------------------
-let last = performance.now(), fpsAcc = 0, fpsN = 0;
+let last = performance.now(), fpsAcc = 0, fpsN = 0, lowFps = 0;
 function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
@@ -1018,9 +1041,13 @@ function loop(now) {
     $("fps").textContent = `${Math.round(fps)} fps`;
     // Автонастройка: слабой видеокарте — меньше октав ряби и меньше пикселей.
     const oct = water.mesh.material.uniforms.octaves;
-    if (document.visibilityState === "visible" && fps > 3) {
-      if (fps < 28 && oct.value > 5) oct.value -= 2;
-      else if (fps < 22 && map.getPixelRatio() > 1) map.setPixelRatio(1);
+    // Автонастройка без «качелей»: плотность пикселей только снижаем и только если FPS
+    // просел два замера подряд (каждая смена разрешения — пересоздание буферов карты).
+    if (document.visibilityState === "visible" && document.hasFocus() && fps > 3) {
+      lowFps = fps < 35 ? lowFps + 1 : 0;
+      const pr = map.getPixelRatio();
+      if (lowFps >= 2 && pr > 1) { map.setPixelRatio(Math.max(1, pr - 0.5)); lowFps = -6; }
+      else if (fps < 28 && oct.value > 5) oct.value -= 2;
       else if (fps > 55 && oct.value < 11) oct.value += 1;
     }
     fpsAcc = fpsN = 0;
@@ -1032,7 +1059,7 @@ function loop(now) {
   fly(dt);
   updateDive(dt);
   updateCity(dt);
-  updateWater();
+  updateWater(dt);
   // Частицы ветра и течений в масштабе города не видны — не тратим на них кадр.
   tracers.pts.visible = wind.pts.visible = !cityState.area;
   if (!cityState.area) updateParticles(state.playing ? dt : 0);

@@ -33,9 +33,14 @@ class Buf {
   }
 }
 
-onmessage = ({ data }) => {
-  const { osm, meta } = data;
-  const code = new Int16Array(data.code);
+onmessage = async ({ data }) => {
+  // Загрузка и разбор данных зоны — тоже здесь, чтобы главный поток не стоял на JSON.
+  const [osm, meta, grid] = await Promise.all([
+    fetch(`/osm/${data.id}.json`).then(r => r.json()),
+    fetch(`/data/flood/${data.id}.json`).then(r => r.json()),
+    fetch(`/data/flood/${data.id}.bin`).then(r => r.arrayBuffer()),
+  ]);
+  const code = new Int16Array(grid);
   const [ox, oy] = mercator(osm.origin[0], osm.origin[1]);
   const meter = 1 / (2 * Math.PI * 6378137 * Math.cos(osm.origin[1] * Math.PI / 180));
   const toLocal = (x, y) => {
@@ -55,6 +60,7 @@ onmessage = ({ data }) => {
     }
     return 2;
   };
+  const [SX, SY] = osm.size;                 // размер зоны, м: координаты текстур расчёта и снимка
   const chunks = new Map();
   const chunk = (x, y) => {
     const key = `${Math.floor(x / CHUNK)}_${Math.floor(y / CHUNK)}`;
@@ -93,6 +99,8 @@ onmessage = ({ data }) => {
       const tx = (bx - ax) / len, ty = (by - ay) / len;
       const v0 = B.n;
       B.push("position", ax, ay, base, bx, by, base, bx, by, top, ax, ay, top);
+      const [ua, va] = pts[i], [ub, vb] = pts[(i + 1) % pts.length];     // метры зоны → текстура расчёта
+      B.push("cuv", ua / SX, va / SY, ub / SX, vb / SY, ub / SX, vb / SY, ua / SX, va / SY);
       for (let k = 0; k < 4; k++) {
         B.push("normal", ty, -tx, 0); B.push("wtan", tx, ty, 0); B.push("fcolor", ...col);
         B.push("fparam", floorH, spacing, H, kind);
@@ -106,8 +114,10 @@ onmessage = ({ data }) => {
     try { tri = ShapeUtils.triangulateShape(P.map(([x, y]) => new Vector2(x, y)), []); } catch { tri = []; }
     const r0 = B.n;
     const rc = colour(b.rc) || ROOFS[Math.floor(hash(nb + 7) * ROOFS.length)];
-    for (const [x, y] of P) {
+    for (let q = 0; q < P.length; q++) {
+      const [x, y] = P[q];
       B.push("position", x, y, top); B.push("normal", 0, 0, 1); B.push("wtan", 1, 0, 0); B.push("wuv", 0, 0);
+      B.push("cuv", pts[q][0] / SX, pts[q][1] / SY);
       B.push("fcolor", ...rc); B.push("fparam", floorH, spacing, H, 2);
     }
     B.n += P.length;
@@ -178,7 +188,7 @@ onmessage = ({ data }) => {
     const c = code[j * gstep * meta.nx + i * gstep];
     const [lx, ly] = toLocal(x, y);
     G.push("position", lx, ly, c === meta.building ? ground(x, y) : c / 100);
-    G.push("normal", 0, 0, 1); G.push("suv", 0, 0); G.push("kind", c < 0 ? 4 : 3);
+    G.push("normal", 0, 0, 1); G.push("suv", x / SX, y / SY); G.push("kind", c < 0 ? 4 : 3);
   }
   for (let j = 0; j < gy - 1; j++) for (let i = 0; i < gx - 1; i++) {
     const a = j * gx + i; G.idx.push(a, a + 1, a + gx, a + 1, a + gx + 1, a + gx);
@@ -203,8 +213,9 @@ onmessage = ({ data }) => {
     under[k] = code[k] === meta.building ? ground((k % meta.nx + 0.5) * meta.res, (Math.floor(k / meta.nx) + 0.5) * meta.res) : code[k] / 100;
   }
 
-  const out = { chunks: [], ground: G.pack(), water: W.pack(), under, nBuildings: nb };
-  const transfer = [under.buffer];
+  const out = { chunks: [], ground: G.pack(), water: W.pack(), under, nBuildings: nb, meta, grid,
+    osm: { origin: osm.origin, size: osm.size, kx: osm.kx, ky: osm.ky, buildings: osm.buildings.length } };
+  const transfer = [under.buffer, grid];
   for (const [key, { b, s }] of chunks) {
     const [cx, cy] = key.split("_").map(Number);
     const [lx, ly] = toLocal((cx + 0.5) * CHUNK, (cy + 0.5) * CHUNK);

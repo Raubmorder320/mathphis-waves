@@ -33,13 +33,26 @@ const COMMON = `
 // Фасад: этажи и окна по метрам стены (u — вдоль стены, v — высота над землёй).
 // Окно — «комната» за стеклом (interior mapping): луч зрения внутри коробки 3,2 × floor × 4 м.
 const FACADE_VS = `
-  attribute vec2 wuv; attribute vec4 fparam; attribute vec3 fcolor; attribute vec3 wtan;
-  varying vec2 vUV; varying vec4 vParam; varying vec3 vCol; varying vec3 vN; varying vec3 vP; varying vec3 vT;
-  void main() { vUV = wuv; vParam = fparam; vCol = fcolor; vN = normal; vP = position; vT = wtan;
+  attribute vec2 wuv; attribute vec4 fparam; attribute vec3 fcolor; attribute vec3 wtan; attribute vec2 cuv;
+  varying vec2 vUV; varying vec4 vParam; varying vec3 vCol; varying vec3 vN; varying vec3 vP; varying vec3 vT; varying vec2 vC;
+  void main() { vUV = wuv; vParam = fparam; vCol = fcolor; vN = normal; vP = position; vT = wtan; vC = cuv;
     gl_Position = projectionMatrix * vec4(position, 1.0); }`;
 const FACADE_FS = COMMON + `
   uniform float night;
-  varying vec2 vUV; varying vec4 vParam; varying vec3 vCol; varying vec3 vN; varying vec3 vP; varying vec3 vT;
+  uniform sampler2D floodState; uniform sampler2D floodTerrain; uniform vec2 floodTexel; uniform float hasFlood;
+  varying vec2 vUV; varying vec4 vParam; varying vec3 vCol; varying vec3 vN; varying vec3 vP; varying vec3 vT; varying vec2 vC;
+  // Уровень воды у стены: наибольший из соседних мокрых ячеек снаружи дома (или −100).
+  float floodSurface() {
+    float z = -100.0;
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.785398;
+      vec2 uv = vC + vec2(cos(a), sin(a)) * floodTexel * 1.6;
+      vec4 t = texture2D(floodTerrain, uv);
+      float d = texture2D(floodState, uv).r;
+      if (t.r < 500.0 && d > 0.02) z = max(z, t.r + d);
+    }
+    return z;
+  }
   void main() {
     vec3 n = normalize(vN);
     vec3 V = normalize(camPos - vP);
@@ -105,6 +118,16 @@ const FACADE_FS = COMMON + `
       c = mix(c, vec3(0.22, 0.28, 0.34), 0.55);                       // издалека окна — тёмные пятна
     }
     c = mix(c, vec3(0.92, 0.90, 0.86) * (0.5 + 0.5 * diff), clamp(frame + mullion, 0.0, 1.0) * (near ? 1.0 : 0.0));
+    // Подтопление: ниже воды стена мокрая и тёмная, на уровне воды — светлая полоса.
+    if (hasFlood > 0.5) {
+      float zs = floodSurface();
+      if (zs > -50.0) {
+        float below = zs - vP.z;
+        c = mix(c, c * vec3(0.35, 0.42, 0.45), smoothstep(-0.05, 0.1, below));
+        c = mix(c, vec3(0.9, 0.95, 0.95), smoothstep(0.18, 0.0, abs(below)) * 0.8);
+        c = mix(c, c * 0.7, smoothstep(0.0, -0.6, below) * smoothstep(-0.6, 0.0, below) * 0.5);  // влажная полоса выше
+      }
+    }
     gl_FragColor = vec4(fogged(c, vP), 1.0);
   }`;
 
@@ -187,7 +210,27 @@ const FLOODW_FS = COMMON + `
                * smoothstep(2.5, 0.6, mpp);
     vec3 c = mix(body, skyColor(R), F) + pow(max(dot(R, sunDir), 0.0), 400.0) * 3.0;
     c = mix(c, vec3(0.92, 0.95, 0.96), foam * 0.8);
+    // Кромка затопления: тонкая вода у фронта светится пеной — видно, куда дошла вода.
+    float edge = smoothstep(0.35, 0.03, vD) * (0.6 + 0.4 * vnoise(p * 0.5 + time));
+    c = mix(c, vec3(0.95, 0.97, 0.95), edge * 0.85);
     gl_FragColor = vec4(fogged(c, vP), mix(0.55, 0.93, smoothstep(0.0, 1.0, vD)));
+  }`;
+
+// Земля зоны: спутниковый снимок (city_sat.py), чуть приглушённый, чтобы дома читались.
+const GROUND_VS = `
+  attribute vec2 suv; attribute float kind;
+  varying vec2 vUV; varying float vKind; varying vec3 vP;
+  void main() { vUV = suv; vKind = kind; vP = position; gl_Position = projectionMatrix * vec4(position, 1.0); }`;
+const GROUND_FS = COMMON + `
+  uniform sampler2D sat; uniform float hasSat;
+  varying vec2 vUV; varying float vKind; varying vec3 vP;
+  void main() {
+    vec3 n = normalize(cross(dFdx(vP), dFdy(vP)));
+    if (n.z < 0.0) n = -n;
+    vec3 c = hasSat > 0.5 ? texture2D(sat, vec2(vUV.x, 1.0 - vUV.y)).rgb * 1.05
+                          : mix(vec3(0.36, 0.42, 0.28), vec3(0.47, 0.46, 0.43), vnoise(vP.xy / 45.0));
+    c *= 0.75 + 0.35 * max(dot(n, sunDir), 0.0);
+    gl_FragColor = vec4(fogged(c, vP), 1.0);
   }`;
 
 // GPU-затопление: модель «виртуальных труб» (Mei et al., 2007) — упрощённая мелкая вода.
@@ -242,7 +285,7 @@ const DEPTH_FS = `
 // Сборка города
 // ---------------------------------------------------------------------------
 const LOD_STREETS = 600;     // м — ближе видны улицы, бордюры и окна
-const LOD_BUILDINGS = 3000;  // м — дальше кварталы скрыты
+const LOD_BUILDINGS = 6000;  // м — дальше кварталы скрыты (до этого — простые блоки без окон)
 const SIM_HZ = 30;           // обновлений затопления в секунду, не больше
 const SIM_SUBSTEPS = 6;      // шагов расчёта за обновление
 
@@ -260,26 +303,25 @@ export class City {
       fragmentShader: FACADE_FS, side: THREE.FrontSide });
     this.streetMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: STREET_VS,
       fragmentShader: STREET_FS, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    this.groundMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: STREET_VS, fragmentShader: STREET_FS });
+    this.uniforms.floodState = { value: null }; this.uniforms.floodTerrain = { value: null };
+    this.uniforms.floodTexel = { value: new THREE.Vector2(1, 1) }; this.uniforms.hasFlood = { value: 0 };
+    this.groundUniforms = { ...this.uniforms, sat: { value: null }, hasSat: { value: 0 } };
+    this.groundMat = new THREE.ShaderMaterial({ uniforms: this.groundUniforms, vertexShader: GROUND_VS, fragmentShader: GROUND_FS });
     this.lastSim = 0;
   }
 
   async load(id) {
     if (this.areas[id]) return this.areas[id];
-    const [osm, meta, grid] = await Promise.all([
-      fetch(`/osm/${id}.json`).then(r => r.json()),
-      fetch(`/data/flood/${id}.json`).then(r => r.json()),
-      fetch(`/data/flood/${id}.bin`).then(r => r.arrayBuffer()),
-    ]);
     const t0 = performance.now();
-    const code = new Int16Array(grid);
-    // Вся генерация геометрии — в воркере; сюда приходят готовые массивы вершин.
+    // Загрузка, разбор и вся генерация геометрии — в воркере; сюда приходят готовые массивы.
     const geo = await new Promise((resolve, reject) => {
       const w = new Worker("/static/city_worker.js", { type: "module" });
       w.onmessage = e => { resolve(e.data); w.terminate(); };
       w.onerror = e => { reject(new Error(e.message)); w.terminate(); };
-      w.postMessage({ osm, meta, code: grid.slice(0) }, []);
+      w.postMessage({ id });
     });
+    const { osm, meta } = geo;
+    const code = new Int16Array(geo.grid);
     const area = { id, osm, meta, code, scene: new THREE.Scene(), chunks: [], nBuildings: geo.nBuildings };
     const o = maplibregl.MercatorCoordinate.fromLngLat(osm.origin, 0);
     area.origin = o; area.meter = o.meterInMercatorCoordinateUnits();
@@ -302,6 +344,14 @@ export class City {
     area.groundMesh.geometry.computeVertexNormals();
     area.scene.add(area.groundMesh);
     this.buildFlood(area, geo);
+    // Снимок зоны — асинхронно; без него земля процедурная.
+    new THREE.TextureLoader().load(`/citysat/${id}.jpg`, tex => {
+      tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 8;
+      area.sat = tex;
+      if (this.active === area) { this.groundUniforms.sat.value = tex; this.groundUniforms.hasSat.value = 1; }
+    });
+    // Шейдеры — заранее и в фоне (иначе первый кадр с кварталами фризит на компиляции).
+    if (this.renderer.compileAsync) await this.renderer.compileAsync(area.scene, this.camera);
     area.nVerts = verts;
     area.buildMs = performance.now() - t0;
     this.areas[id] = area;
@@ -391,7 +441,17 @@ export class City {
   reset(area) { area.sim.ready = false; }
 
   // Отрисовка зоны: matrix — матрица MapLibre для единиц Меркатора.
+  activate(area) {
+    this.active = area;
+    this.groundUniforms.sat.value = area.sat || null; this.groundUniforms.hasSat.value = area.sat ? 1 : 0;
+    this.uniforms.floodTerrain.value = area.sim.terrain;
+    this.uniforms.floodTexel.value.set(1 / area.meta.nx, 1 / area.meta.ny);
+  }
+
   render(area, matrix) {
+    if (this.active !== area) this.activate(area);
+    this.uniforms.floodState.value = area.sim.state[area.sim.cur].texture;
+    this.uniforms.hasFlood.value = area.sim.ready ? 1 : 0;
     const M = new THREE.Matrix4().fromArray(matrix).multiply(
       new THREE.Matrix4().makeTranslation(area.origin.x, area.origin.y, area.origin.z)
         .scale(new THREE.Vector3(area.meter, -area.meter, area.meter)));
