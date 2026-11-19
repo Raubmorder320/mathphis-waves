@@ -30,6 +30,15 @@
         <button data-mode="eta">Уровень η</button>
         <button data-mode="nonlin">Нелинейность a/h</button>
       </div>
+      <div class="run2d" title="Свой расчёт двумерной мелкой воды на карте залива">
+        <span class="lbl">2D:</span>
+        <label>a, м <input id="r2-a" type="number" min="0" max="3" step="0.1" value="0.5"></label>
+        <label>λ, км <input id="r2-l" type="number" min="20" max="1000" step="10" value="300"></label>
+        <label>ветер, м/с <input id="r2-w" type="number" min="0" max="40" step="1" value="25"></label>
+        <label>откуда, ° <input id="r2-d" type="number" min="0" max="359" step="15" value="270"></label>
+        <label>часов <input id="r2-h" type="number" min="1" max="24" step="1" value="12"></label>
+        <button id="run2d">Посчитать</button>
+      </div>
       <label class="slider">Вертикаль η ×<b id="exag-v">100</b>
         <input id="exag" type="range" min="10" max="1000" step="10" value="100">
       </label>
@@ -84,7 +93,7 @@
       <canvas id="sec-canvas" width="520" height="230"></canvas>
       <div class="sec-time"><button id="sec-play">❚❚</button><input id="sec-scrub" type="range" min="0" max="1000" value="0"><span id="sec-t"></span></div>
       <div class="legend">
-        <span class="l-linear">линейная</span><span class="l-sv">Сен-Венан</span><span class="l-b">Буссинеск</span><span class="l-2d">срез 2D-сценария</span>
+        <span class="l-linear">линейная</span><span class="l-sv">Сен-Венан</span><span class="l-b">Буссинеск</span><span class="l-kdv">КдФ (ровное дно)</span><span class="l-2d">срез 2D-сценария</span>
       </div>
       <table id="sec-table"></table>
       <div id="sec-note"></div>

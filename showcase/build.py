@@ -37,10 +37,10 @@ PLACES = [
 FLOODS = [("1824", 4.21), ("1924", 3.80), ("1955", 2.93), ("1975", FLOOD_1975)]
 
 
-def run(a, wind, t_end=T_END, frames=N_FRAMES, uv=False, wavelength=WAVELENGTH):
+def run(a, wind, t_end=T_END, frames=N_FRAMES, uv=False, wavelength=WAVELENGTH, wind_dir=270.0):
     x, y, h, lon, lat = load_gulf()
     t = np.linspace(0.0, t_end, frames)
-    extra = {"wind_speed": wind, "wind_dir": 270.0}
+    extra = {"wind_speed": wind, "wind_dir": wind_dir}
     out = solve_2d(x, y, h, np.zeros_like(h), np.zeros_like(h), "gulf", t, a, wavelength, extra,
                    return_uv=uv)
     return (t, *out)
@@ -129,6 +129,23 @@ def main(only=None):
     (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     size = sum(f.stat().st_size for f in OUT.iterdir()) / 1e6
     print(f"Готово: {OUT} ({size:.1f} МБ)")
+
+
+def run_custom(sid, a, wavelength, wind, wind_dir, hours, out_dir):
+    """Свой 2D-расчёт из интерфейса: тот же формат, что у готовых сценариев, файлы — в out_dir."""
+    x, y, h, lon, lat = load_gulf()
+    g = gauge(lon, lat, h)
+    t, eta, eta_max, u, v = run(a, wind, hours * HOUR, uv=True, wavelength=wavelength, wind_dir=wind_dir)
+    eta_c, eta_s = pack(eta)
+    uv_c, uv_s = pack(np.stack((u[::UV_EVERY], v[::UV_EVERY])))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    eta_c.tofile(out_dir / f"{sid}_eta.bin")
+    uv_c.tofile(out_dir / f"{sid}_uv.bin")
+    title = f"Свой расчёт: волна {a:g} м × {wavelength / 1e3:g} км, ветер {wind:g} м/с из {wind_dir:g}°"
+    return dict(id=sid, title=title, a=a, wind=wind, wind_dir=wind_dir, wavelength=wavelength,
+                t=np.round(t, 1).tolist(), frames=len(t), eta_scale=eta_s, uv_scale=uv_s, uv_every=UV_EVERY,
+                spb_level=np.round(eta[:, g[0], g[1]], 4).tolist(), spb_max=round(float(eta_max[g]), 3),
+                eta_max=np.round(eta_max, 3).tolist(), files=dict(eta=f"/custom/{sid}_eta.bin", uv=f"/custom/{sid}_uv.bin"))
 
 
 def fit_1975():

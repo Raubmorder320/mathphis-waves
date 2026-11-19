@@ -13,18 +13,24 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+import tempfile
+import uuid
+
+from showcase.build import run_custom
 from showcase.section import solve_section
 from showcase.tiles import ATTRIBUTION, SOURCES, get_tile
 
 HERE = Path(__file__).resolve().parent
+CUSTOM = Path(tempfile.gettempdir()) / "fingulf3d_custom"     # свои 2D-расчёты из интерфейса
+CUSTOM.mkdir(exist_ok=True)
 pool: ProcessPoolExecutor | None = None
 
 
 @asynccontextmanager
 async def lifespan(app):
-    # Два процесса держим заранее: Сен-Венан и Буссинеск разреза считаются параллельно.
+    # Три процесса держим заранее: Сен-Венан, Буссинеск и КдФ разреза считаются параллельно.
     global pool
-    pool = ProcessPoolExecutor(max_workers=2)
+    pool = ProcessPoolExecutor(max_workers=3)
     yield
     pool.shutdown(cancel_futures=True)
 
@@ -41,6 +47,18 @@ async def no_stale_code(request, call_next):
     return resp
 app.mount("/data", StaticFiles(directory=HERE / "data"), name="data")
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+app.mount("/custom", StaticFiles(directory=CUSTOM), name="custom")
+
+
+@app.post("/run2d")
+async def run2d(a: float = Body(0.5), wavelength_km: float = Body(300), wind: float = Body(0),
+                wind_dir: float = Body(270), hours: float = Body(12)):
+    """Свой расчёт shallow_2d на карте залива (20–30 с), результат — как готовый сценарий."""
+    if not (0 <= a <= 3 and 20 <= wavelength_km <= 1000 and 0 <= wind <= 40 and 1 <= hours <= 24):
+        raise HTTPException(400, "Амплитуда 0–3 м, длина волны 20–1000 км, ветер 0–40 м/с, время 1–24 ч")
+    sid = "custom_" + uuid.uuid4().hex[:8]
+    fut = pool.submit(run_custom, sid, a, wavelength_km * 1e3, wind, wind_dir % 360, hours, CUSTOM)
+    return await run_in_threadpool(fut.result)
 
 
 @app.get("/")

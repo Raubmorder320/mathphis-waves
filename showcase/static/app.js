@@ -11,6 +11,7 @@ const MODELS = [
   { id: "linear", name: "Линейная", color: "#f2f5f8" },
   { id: "saint_venant", name: "Сен-Венан", color: "#ff7a2f" },
   { id: "boussinesq", name: "Буссинеск", color: "#2fe0d0" },
+  { id: "kdv", name: "КдФ (ровное дно)", color: "#c58cff" },
 ];
 // Детальные зоны города (showcase/osm_builder.py, flood_map.py).
 const CITY_AREAS = [
@@ -73,8 +74,8 @@ async function loadScenario(id) {
   const m = state.manifest;
   const s = m.scenarios.find(x => x.id === id);
   const [e, uv] = await Promise.all([
-    fetch(`/data/${id}_eta.bin`).then(r => r.arrayBuffer()),
-    fetch(`/data/${id}_uv.bin`).then(r => r.arrayBuffer()),
+    fetch(s.files?.eta || `/data/${id}_eta.bin`).then(r => r.arrayBuffer()),
+    fetch(s.files?.uv || `/data/${id}_uv.bin`).then(r => r.arrayBuffer()),
   ]);
   state.scenario = s;
   state.eta = new Int16Array(e);
@@ -87,8 +88,10 @@ async function loadScenario(id) {
   state.exag = id === "front" ? 300 : 100;
   $("exag").value = state.exag; $("exag-v").textContent = state.exag;
   $("wind-v").textContent = s.wind.toFixed(s.wind % 1 ? 1 : 0);
-  $("wind-name").textContent = s.wind ? "западный" : "штиль";
-  $("arrow").style.transform = "rotate(90deg)";          // западный ветер дует на восток
+  const dir = s.wind_dir ?? 270;
+  const NAMES = ["северный", "северо-восточный", "восточный", "юго-восточный", "южный", "юго-западный", "западный", "северо-западный"];
+  $("wind-name").textContent = s.wind ? NAMES[Math.round(dir / 45) % 8] : "штиль";
+  $("arrow").style.transform = `rotate(${dir - 180}deg)`;   // стрелка — куда дует
   drawGaugeBase();
 }
 
@@ -621,6 +624,7 @@ function fillSectionTable(sec) {
   if (b > 1.3 * sv) notes.push(`Буссинеск выше Сен-Венана: дисперсия превратила фронт в цепочку волн, а не в бор.`);
   if (lin / sm.depth > 0.1) notes.push(`a/h ≈ ${(lin / sm.depth).toFixed(2)} — включилась и <b>местная</b> нелинейность.`);
   if (!notes.length) notes.push("Здесь модели почти совпадают: волна ещё линейна.");
+  notes.push(`КдФ дно не учитывает: считается на ровной глубине ${sm.kdv_depth.toFixed(1)} м — с ней волна приходит в точку в то же время, что над реальным дном.`);
   notes.push(`Волна приходит через ${(sm.arrival / 60).toFixed(0)} мин, до берега дальше ${(sm.to_shore / 1000).toFixed(0)} км. Расчёт ${sm.elapsed.toFixed(1)} с.`);
   $("sec-note").innerHTML = notes.join("<br>");
 }
@@ -1188,6 +1192,26 @@ document.querySelectorAll("#color-mode button").forEach(b => b.addEventListener(
 }));
 document.querySelectorAll("#foci button").forEach(b => b.addEventListener("click", () => goFocus(+b.dataset.focus)));
 $("sec-close").addEventListener("click", closeSection);
+// Свой 2D-расчёт: сервер считает shallow_2d, результат становится новым сценарием.
+$("run2d").addEventListener("click", async () => {
+  const body = { a: +$("r2-a").value, wavelength_km: +$("r2-l").value, wind: +$("r2-w").value,
+    wind_dir: +$("r2-d").value, hours: +$("r2-h").value };
+  $("run2d").disabled = true;
+  toast(`<span class="spin"></span>Считаю мелкую воду 2D на карте залива (150 × 50, ${body.hours} ч)…`);
+  const t0 = performance.now();
+  try {
+    const r = await fetch("/run2d", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const sc = await r.json();
+    state.manifest.scenarios.push(sc);
+    $("scenario").append(new Option(sc.title, sc.id));
+    $("scenario").value = sc.id;
+    await loadScenario(sc.id);
+    state.t = 0;
+    toast(`Готово за ${((performance.now() - t0) / 1000).toFixed(0)} с: у Петербурга до +${sc.spb_max.toFixed(2)} м`, false, 4000);
+  } catch (e) { toast(`Расчёт не удался: ${e.message || e}`, true); }
+  $("run2d").disabled = false;
+});
 $("stop-render").addEventListener("click", () => {
   renderPaused = !renderPaused;
   $("stop-render").textContent = renderPaused ? "▶ Рендер" : "⏹ Стоп";

@@ -14,6 +14,7 @@ import numpy as np
 
 from backend.common import G, N_PACKET, u_linear, u_simple_wave
 from backend.models.boussinesq import GAMMA, H_WALL, solve_boussinesq
+from backend.models.kdv import solve_kdv
 from backend.models.linear import solve_linear
 from backend.models.saint_venant import solve_sv
 from backend.models.shallow_2d import load_gulf
@@ -22,7 +23,7 @@ NX = 1000            # узлов на разрезе
 OUT_NODES = 400      # узлов в ответе
 OUT_FRAMES = 160     # кадров в ответе
 H_MIN = 1.0          # м — меньшую глубину внутри пути не допускаем (сглаживание у берега)
-MODELS = ("linear", "saint_venant", "boussinesq")
+MODELS = ("linear", "saint_venant", "boussinesq", "kdv")
 
 
 class Gulf:
@@ -169,6 +170,21 @@ def _run_boussinesq(h, eta0, dx, t, a, wavelength):
     return eta, 1
 
 
+def _run_kdv(s, eta0, t, h_eff):
+    """КдФ: дно не учитывается — ровное дно h_eff (волна приходит в точку в то же время).
+
+    Область периодическая, поэтому берём её вдвое длиннее пути: волна не успевает
+    обернуться. Результат интерполируется на узлы пути.
+    """
+    # Солитоны КдФ узкие (~140 м при Ur ~ 5000): шаг 94 м, иначе ответ зависит от сетки.
+    n, L = 4096, 2.0 * s[-1]
+    x = np.arange(n) * L / n
+    dense = np.linspace(t[0], t[-1], 4 * (len(t) - 1) + 1)     # пик в точке: солитон быстрее кадров
+    frames = solve_kdv(np.interp(x, s, eta0, right=0.0), h_eff, L, dense)
+    out = np.array([np.interp(s, x, row) for row in frames])
+    return out[::4], out.max(axis=0)
+
+
 def solve_section(lon, lat, a=0.5, wavelength=10e3, pool=None):
     """Посчитать три модели вдоль пути волны через точку (lon, lat).
 
@@ -195,15 +211,20 @@ def solve_section(lon, lat, a=0.5, wavelength=10e3, pool=None):
     t = np.linspace(0.0, t_end, OUT_FRAMES)
 
     start = time.perf_counter()
+    # КдФ на ровном дне: глубина, при которой время пробега до точки то же, что над реальным дном.
+    h_eff = float((s[i_click] / max(travel[i_click], 1e-6)) ** 2 / G) if i_click > 0 else float(h[0])
     if pool is not None:
         f_sv = pool.submit(_run_sv, h, eta0, dx, t)
         f_b = pool.submit(_run_boussinesq, h, eta0, dx, t, a, wavelength)
+        f_k = pool.submit(_run_kdv, s, eta0, t, h_eff)
     eta = {"linear": solve_linear(h, eta0, u_linear(h, eta0), dx, t, False)}
     if pool is not None:
         eta["saint_venant"], (eta["boussinesq"], wet) = f_sv.result(), f_b.result()
+        eta["kdv"], kdv_peak = f_k.result()
     else:
         eta["saint_venant"] = _run_sv(h, eta0, dx, t)
         eta["boussinesq"], wet = _run_boussinesq(h, eta0, dx, t, a, wavelength)
+        eta["kdv"], kdv_peak = _run_kdv(s, eta0, t, h_eff)
     elapsed = time.perf_counter() - start
 
     # Крутизна фронта: наибольший |η_x| за время в каждом узле, относительно линейной.
@@ -218,6 +239,7 @@ def solve_section(lon, lat, a=0.5, wavelength=10e3, pool=None):
 
     at = {m: float(np.nanmax(e[:, i_click])) if np.isfinite(e[:, i_click]).any() else 0.0
           for m, e in eta.items()}
+    at["kdv"] = float(kdv_peak[i_click])
     lon_p, lat_p = gulf.to_lonlat(pts[:, 0], pts[:, 1])
     pick = np.linspace(0, len(s) - 1, OUT_NODES).round().astype(int)
     pick = np.unique(np.r_[pick, i_click])
@@ -232,7 +254,7 @@ def solve_section(lon, lat, a=0.5, wavelength=10e3, pool=None):
             a=a, wavelength=wavelength, depth=float(h[i_click]), distance=float(s[i_click]),
             to_shore=float(s[-1] - s[i_click]), arrival=float(travel[i_click]),
             max_eta=at, a_over_h={m: v / max(float(h[i_click]), 1e-6) for m, v in at.items()},
-            steep_at_click=float(ratio[i_click]),
+            steep_at_click=float(ratio[i_click]), kdv_depth=h_eff,
             steep2_distance=None if i_steep is None else float(s[i_steep]),
             elapsed=elapsed,
         ),

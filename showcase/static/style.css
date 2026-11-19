@@ -156,3 +156,12 @@ select option { background: #0b1522; }
 body:has(#dive.on) #top, body:has(#dive.on) #section { display: none; }
 
 body.diving .maplibregl-marker { display: none; }
+
+.l-kdv::before { background: #c58cff; }
+
+.run2d { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+.run2d .lbl { color: var(--accent); font-weight: 700; }
+.run2d label { display: flex; gap: 4px; align-items: center; }
+.run2d input { width: 58px; padding: 3px 5px; }
+.run2d button { background: var(--accent); color: #1b1200; border-color: var(--accent); font-weight: 700; }
+.run2d button:disabled { opacity: .5; cursor: wait; }
